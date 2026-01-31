@@ -21,12 +21,6 @@ const APP_DATABASE: MediaApp[] = [
   { id: 'waze', name: 'Waze', icon: 'fab fa-waze', color: 'text-[#33CCFF]', category: 'NAV', scheme: 'waze://?q=' },
 ];
 
-const ORDINAL_MAP: Record<string, string> = {
-  "primeiro": "1", "segundo": "2", "terceiro": "3", "quarto": "4", "quinto": "5",
-  "sexto": "6", "sétimo": "7", "oitavo": "8", "nono": "9", "décimo": "10",
-  "último": "último", "penúltimo": "penúltimo", "próximo": "próximo", "anterior": "anterior"
-};
-
 const toolDeclarations: FunctionDeclaration[] = [
   {
     name: 'system_action',
@@ -35,8 +29,8 @@ const toolDeclarations: FunctionDeclaration[] = [
       description: 'Executa comandos de sistema no Android Auto.',
       properties: {
         action: { type: Type.STRING, enum: ['OPEN', 'PLAY', 'NAVIGATE', 'MINIMIZE', 'MAXIMIZE', 'CLOSE_MEDIA', 'EXIT'] },
-        target: { type: Type.STRING, description: 'App ou Destino.' },
-        params: { type: Type.STRING, description: 'Termo de busca (música, série ou número do episódio).' }
+        target: { type: Type.STRING, description: 'App alvo (ex: netflix, youtube).' },
+        params: { type: Type.STRING, description: 'BUSCA TÉCNICA: O Nome exato do episódio resolvido pela sua base de dados.' }
       },
       required: ['action', 'target']
     }
@@ -55,8 +49,6 @@ const App: React.FC = () => {
   const [mediaState, setMediaState] = useState<MediaViewState>('HIDDEN');
   const [pipPos, setPipPos] = useState({ x: 20, y: window.innerHeight - 320 });
   const [currentApp, setCurrentApp] = useState<MediaApp>(APP_DATABASE[0]);
-  
-  const lastMediaRef = useRef<{ title: string, app: string, lastEp?: string }>({ title: '', app: '' });
 
   const [travel, setTravel] = useState<TravelInfo>({ 
     destination: 'AGUARDANDO DESTINO', 
@@ -74,50 +66,22 @@ const App: React.FC = () => {
   const handleSystemAction = async (fc: any) => {
     const { action, target, params } = fc.args;
     let finalQuery = params || target || "";
-    let isEpisodeRequest = false;
 
-    // PROCESSAMENTO DE ORDINAIS E EPISÓDIOS
-    const words = finalQuery.toLowerCase().split(' ');
-    let episodeModifier = "";
-
-    words.forEach(word => {
-      if (ORDINAL_MAP[word]) {
-        episodeModifier = `episódio ${ORDINAL_MAP[word]}`;
-        isEpisodeRequest = true;
-      }
-    });
-
-    if (finalQuery.toLowerCase().includes("episódio") || finalQuery.toLowerCase().includes("capítulo")) {
-      isEpisodeRequest = true;
-    }
-
-    // Lógica de Contexto para "próximo", "anterior" ou apenas o número do episódio
-    if (isEpisodeRequest && lastMediaRef.current.title && !finalQuery.toLowerCase().includes(lastMediaRef.current.title.toLowerCase())) {
-       finalQuery = `${lastMediaRef.current.title} ${episodeModifier || finalQuery}`;
-    } else if (isEpisodeRequest && episodeModifier) {
-       // Se já tem o nome da série mas usou ordinal, injetamos a palavra mágica "episódio"
-       const baseTitle = finalQuery.replace(/primeiro|segundo|terceiro|quarto|quinto|sexto|sétimo|oitavo|nono|décimo|último|penúltimo/gi, '').trim();
-       finalQuery = `${baseTitle} ${episodeModifier}`;
-    }
-
-    // Sanitização final para players
-    const cleanSearch = finalQuery.replace(/abrir|assistir|tocar|no|o|a|para|filme|música|vídeo/gi, '').trim();
-
-    if (action === 'EXIT') { setIsSystemBooted(false); stopVoiceSession(); return { status: "Encerrando." }; }
-    if (action === 'MINIMIZE') { setMediaState('PIP'); return { status: "Minimizado." }; }
-    if (action === 'MAXIMIZE') { setMediaState('FULL'); return { status: "Tela cheia." }; }
+    if (action === 'EXIT') { setIsSystemBooted(false); stopVoiceSession(); return { status: "Offline." }; }
+    if (action === 'MINIMIZE') { setMediaState('PIP'); return { status: "PIP Ativo." }; }
+    if (action === 'MAXIMIZE') { setMediaState('FULL'); return { status: "Full Screen." }; }
 
     if (action === 'NAVIGATE') {
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cleanSearch)}&limit=1`);
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(finalQuery)}&limit=1`);
         const data = await res.json();
         if (data[0]) {
           const coords: [number, number] = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-          setTravel(p => ({ ...p, destination: cleanSearch.toUpperCase(), destinationCoords: coords }));
-          window.open(`waze://?q=${encodeURIComponent(cleanSearch)}&navigate=yes`, '_system');
-          return { status: `GPS ajustado para ${cleanSearch}.` };
+          setTravel(p => ({ ...p, destination: finalQuery.toUpperCase(), destinationCoords: coords }));
+          window.open(`waze://?q=${encodeURIComponent(finalQuery)}&navigate=yes`, '_system');
+          return { status: `Vetor ajustado para ${finalQuery}.` };
         }
-      } catch (e) { return { status: "Erro de mapa." }; }
+      } catch (e) { return { status: "Erro GPS." }; }
     }
 
     const app = APP_DATABASE.find(a => a.name.toLowerCase().includes(target.toLowerCase()) || a.id === target.toLowerCase());
@@ -125,24 +89,16 @@ const App: React.FC = () => {
     if (app) {
       setCurrentApp(app);
       setMediaState('FULL');
+      setTrack(p => ({ ...p, title: finalQuery.toUpperCase(), artist: app.name, isPlaying: true }));
       
-      // Armazena contexto (tira o sufixo de episódio para manter apenas o nome da série na memória)
-      const seriesNameOnly = cleanSearch.split(/episódio|capítulo/i)[0].trim();
-      if (seriesNameOnly.length > 2) {
-        lastMediaRef.current = { title: seriesNameOnly, app: app.id };
-      }
-
-      setTrack(p => ({ ...p, title: cleanSearch.toUpperCase(), artist: app.name, isPlaying: true }));
-      
-      const finalUrl = `${app.scheme}${encodeURIComponent(cleanSearch)}`;
+      const finalUrl = `${app.scheme}${encodeURIComponent(finalQuery)}`;
       window.open(finalUrl, '_system');
       
-      setStatusLog(`MÍDIA: ${cleanSearch.toUpperCase()}`);
-      
-      return { status: `Entendido! Localizando o ${cleanSearch} no ${app.name} agora.` };
+      setStatusLog(`MÍDIA: ${finalQuery.toUpperCase()}`);
+      return { status: `Lançando ${finalQuery} no ${app.name}.` };
     }
 
-    return { status: "OK." };
+    return { status: "Executado." };
   };
 
   const startVoiceSession = async () => {
@@ -156,7 +112,7 @@ const App: React.FC = () => {
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
-            setIsListening(true); setStatusLog("EVA: CORE ONLINE"); setIsSystemBooted(true);
+            setIsListening(true); setStatusLog("EVA: CORE CONNECTED"); setIsSystemBooted(true);
             const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
             const source = inputCtx.createMediaStreamSource(stream);
             const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
@@ -193,17 +149,19 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `Você é a EVA V100. Sua função é controlar o entretenimento do carro.
-          IMPORTANTE:
-          1. Se o motorista pedir um episódio por ordem (ex: "coloque o quinto de Grey's Anatomy"), você deve chamar system_action com params="Grey's Anatomy episódio 5".
-          2. Use SEMPRE a palavra "episódio" quando se tratar de séries para facilitar a busca nos apps.
-          3. Você entende ordinais: primeiro=1, segundo=2, décimo=10, etc.
-          4. Se o motorista disser apenas "próximo" ou "anterior" enquanto uma série toca, presuma que é o próximo episódio daquela série.
-          5. Seja rápida, motoristas não gostam de conversa longa.`
+          systemInstruction: `Você é a EVA V100. Sua missão é ser o co-piloto mais inteligente do mundo.
+          PROTOCOLOS DE CATÁLOGO (MUITO IMPORTANTE):
+          1. Você tem acesso mental a TODOS os nomes de episódios de todas as séries (Netflix, Globoplay, Max, etc).
+          2. Quando o motorista pedir por ordem (ex: "Coloca o primeiro de Stranger Things"), você NUNCA deve enviar apenas "episódio 1".
+          3. Você deve RESOLVER o nome: Identifique que T1E1 é "O Desaparecimento de Will Byers".
+          4. No comando system_action, o parâmetro 'params' deve conter: "[Nome da Série] Temporada [X] Episódio [Y] - [Nome do Episódio]".
+          5. Antes de abrir o app, diga verbalmente o nome do episódio para o motorista: "Com certeza! Localizei o episódio 1: 'O Desaparecimento de Will Byers'. Abrindo no Netflix agora."
+          6. Se pedirem "o próximo", "o anterior", "o último" ou ordinais (primeiro ao centésimo), use sua base de dados interna para encontrar o título exato.
+          7. Mantenha o tom profissional, mas levemente sarcástico se o motorista estiver devagar ou rápido demais.`
         }
       });
       sessionRef.current = await sessionPromise;
-    } catch (e) { setStatusLog("ERRO DE CONEXÃO"); }
+    } catch (e) { setStatusLog("CORE ERROR"); }
   };
 
   const stopVoiceSession = () => {
@@ -224,11 +182,11 @@ const App: React.FC = () => {
       <div className="h-screen w-screen bg-black flex flex-col items-center justify-center p-10 font-sans italic">
          <div className="w-64 h-64 rounded-full border-4 border-blue-500/30 p-2 mb-10 animate-pulse">
             <div className="w-full h-full rounded-full bg-blue-600/20 flex items-center justify-center border-4 border-blue-500 shadow-[0_0_100px_rgba(37,99,235,0.4)]">
-               <i className="fas fa-layer-group text-7xl text-white"></i>
+               <i className="fas fa-microchip text-7xl text-white"></i>
             </div>
          </div>
          <h1 className="text-4xl font-black text-white uppercase mb-4 tracking-tighter">EVA CORE V100</h1>
-         <button onClick={startVoiceSession} className="w-full max-w-sm h-20 bg-blue-600 rounded-[30px] text-white font-black text-xl shadow-2xl uppercase">BOOT PANDORA</button>
+         <button onClick={startVoiceSession} className="w-full max-w-sm h-20 bg-blue-600 rounded-[30px] text-white font-black text-xl shadow-2xl uppercase">SYSTEM BOOT</button>
       </div>
     );
   }
@@ -249,7 +207,7 @@ const App: React.FC = () => {
             }));
           }} 
         />
-        <div className="absolute inset-0 bg-black/50 backdrop-blur-[1px]" />
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px]" />
       </div>
 
       {mediaState === 'FULL' && (
@@ -271,8 +229,8 @@ const App: React.FC = () => {
       <div className={`relative z-10 h-full w-full flex flex-col p-6 pointer-events-none transition-opacity duration-700 ${mediaState === 'FULL' ? 'opacity-0' : 'opacity-100'}`}>
         <header className="flex justify-between items-start pointer-events-auto">
           <div className="bg-black/80 backdrop-blur-3xl p-10 rounded-[60px] border border-white/10 shadow-2xl flex flex-col items-center">
-            <span className={`text-[10rem] font-black italic tracking-tighter leading-none ${currentSpeed > 60 ? 'text-red-500' : 'text-white'}`}>{currentSpeed}</span>
-            <div className="font-black text-blue-500 uppercase text-xs mt-2 tracking-widest">KM/H • HUD SYNC</div>
+            <span className={`text-[10rem] font-black italic tracking-tighter leading-none ${currentSpeed > 60 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{currentSpeed}</span>
+            <div className="font-black text-blue-500 uppercase text-xs mt-2 tracking-widest">KM/H • HUD STATUS</div>
           </div>
 
           <div className="flex-1 mx-8">
@@ -281,8 +239,8 @@ const App: React.FC = () => {
                  <i className={`fas fa-arrow-turn-up ${travel.nextInstruction?.maneuver?.includes('right') ? 'rotate-90' : travel.nextInstruction?.maneuver?.includes('left') ? '-rotate-90' : ''}`}></i>
               </div>
               <div className="flex-1 min-w-0">
-                <span className="text-xs font-black text-white/70 uppercase">Faltam {travel.nextInstruction?.distance || 0}m</span>
-                <h2 className="text-3xl font-black text-white uppercase truncate leading-none mb-1">{travel.nextInstruction?.instruction || 'Siga no Trecho'}</h2>
+                <span className="text-xs font-black text-white/70 uppercase">Em {travel.nextInstruction?.distance || 0}m</span>
+                <h2 className="text-3xl font-black text-white uppercase truncate leading-none mb-1">{travel.nextInstruction?.instruction || 'Siga o Fluxo'}</h2>
                 <p className="text-lg font-bold text-blue-100 uppercase opacity-80 truncate">{travel.nextInstruction?.street || 'Rota Pandora V100'}</p>
               </div>
             </div>
