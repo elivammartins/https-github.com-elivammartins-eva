@@ -8,10 +8,17 @@ export interface LocationData {
 
 export type WarningType = 'RADAR' | 'ACCIDENT' | 'HAZARD' | 'POLICE' | 'TRAFFIC';
 
+export interface RouteStep {
+  instruction: string;
+  street: string;
+  distance: number;
+  maneuver: string;
+}
+
 export interface RouteWarning {
   id: string;
   type: WarningType;
-  distance: number; // em metros
+  distance: number;
   description: string;
   coords: [number, number];
 }
@@ -20,9 +27,10 @@ export interface StopInfo {
   name: string;
   type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE';
   coords: [number, number];
+  distanceToNext?: string;
+  timeToNext?: string;
 }
 
-// Added StopRecommendation to resolve error in RecommendationCard.tsx
 export interface StopRecommendation {
   name: string;
   type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE';
@@ -30,27 +38,26 @@ export interface StopRecommendation {
   rating: number;
 }
 
-// Added AppSettings to resolve error in SettingsMenu.tsx
 export interface AppSettings {
   userName: string;
   voiceVolume: number;
 }
 
-// Added MeetingInfo to resolve error in MeetingView.tsx
 export interface MeetingInfo {
   title: string;
   startTime: string;
-  id?: string;
 }
 
 export interface TravelInfo {
   destination: string;
   destinationCoords?: [number, number];
   stops: StopInfo[];
-  nextInstruction?: { instruction: string; distance: string; icon: string };
+  nextInstruction?: RouteStep;
+  allSteps?: RouteStep[];
   warnings: RouteWarning[];
-  // Added drivingTimeMinutes to resolve property access in Dashboard.tsx
   drivingTimeMinutes?: number;
+  totalDistanceKm?: number;
+  currentLimit?: number;
 }
 
 export interface TrackMetadata {
@@ -65,11 +72,5 @@ export interface MediaApp {
   name: string;
   icon: string;
   color: string;
-  category: 'AUDIO' | 'VIDEO' | 'NAV' | 'METRICS';
-}
-
-export enum LayoutMode {
-  HUD = 'HUD',
-  FULL_MAP = 'FULL_MAP',
-  VIDEO_FOCUS = 'VIDEO_FOCUS'
+  category: 'AUDIO' | 'VIDEO' | 'MEETING' | 'NAV';
 }
