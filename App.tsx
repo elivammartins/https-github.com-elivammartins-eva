@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
-import { TravelInfo, MediaApp, TrackMetadata, RouteStep, MediaViewState, AppSettings, PlayerProfile } from './types';
+import { TravelInfo, MediaApp, TrackMetadata, RouteStep, MediaViewState, AppSettings, CarAction, CarStatus } from './types';
 import Avatar from './components/Avatar';
 import NavigationPanel from './components/NavigationPanel';
 import MapView from './components/MapView';
@@ -9,30 +9,39 @@ import AddStopModal from './components/AddStopModal';
 import MiniPlayer from './components/MiniPlayer';
 import EntertainmentHub from './components/EntertainmentHub';
 import SettingsMenu from './components/SettingsMenu';
+import BluelinkPanel from './components/BluelinkPanel';
 import { decode, decodeAudioData, createBlob } from './utils/audio';
 
 const APP_DATABASE: MediaApp[] = [
   { id: 'spotify', name: 'Spotify', icon: 'fab fa-spotify', color: 'text-[#1DB954]', category: 'AUDIO', scheme: 'spotify:search:' },
-  { id: 'deezer', name: 'Deezer', icon: 'fas fa-music', color: 'text-purple-500', category: 'AUDIO', scheme: 'deezer://www.deezer.com/search/' },
   { id: 'ytmusic', name: 'YouTube Music', icon: 'fas fa-play-circle', color: 'text-red-500', category: 'AUDIO', scheme: 'https://music.youtube.com/search?q=' },
   { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'https://www.youtube.com/results?search_query=' },
   { id: 'netflix', name: 'Netflix', icon: 'fas fa-film', color: 'text-red-700', category: 'VIDEO', scheme: 'https://www.netflix.com/search?q=' },
   { id: 'globoplay', name: 'Globoplay', icon: 'fas fa-play', color: 'text-white', category: 'VIDEO', scheme: 'https://globoplay.globo.com/busca/?q=' },
-  { id: 'max', name: 'Max', icon: 'fas fa-star', color: 'text-blue-600', category: 'VIDEO', scheme: 'https://www.max.com/search/' },
-  { id: 'disney', name: 'Disney+', icon: 'fas fa-plus-circle', color: 'text-blue-400', category: 'VIDEO', scheme: 'https://www.disneyplus.com/search?q=' },
   { id: 'waze', name: 'Waze', icon: 'fab fa-waze', color: 'text-[#33CCFF]', category: 'NAV', scheme: 'waze://?q=' },
 ];
 
 const toolDeclarations: FunctionDeclaration[] = [
   {
+    name: 'car_control',
+    parameters: {
+      type: Type.OBJECT,
+      description: 'Controla funções do HB20 via Bluelink.',
+      properties: {
+        command: { type: Type.STRING, enum: ['START', 'STOP', 'LOCK', 'UNLOCK', 'WINDOWS_UP', 'WINDOWS_DOWN', 'HAZARD_LIGHTS', 'HORN_LIGHTS'] }
+      },
+      required: ['command']
+    }
+  },
+  {
     name: 'system_action',
     parameters: {
       type: Type.OBJECT,
-      description: 'Comandos da EVA para o sistema do carro.',
+      description: 'Comandos multimídia e navegação.',
       properties: {
-        action: { type: Type.STRING, enum: ['OPEN', 'PLAY', 'NAVIGATE', 'MINIMIZE', 'MAXIMIZE', 'EXIT'] },
-        target: { type: Type.STRING, description: 'O app que o motorista quer (use ids: youtube, ytmusic, netflix, spotify, etc).' },
-        params: { type: Type.STRING, description: 'Termo de busca exato em Português.' }
+        action: { type: Type.STRING, enum: ['OPEN', 'PLAY', 'NAVIGATE', 'MINIMIZE', 'MAXIMIZE'] },
+        target: { type: Type.STRING },
+        params: { type: Type.STRING }
       },
       required: ['action', 'target']
     }
@@ -44,90 +53,75 @@ const App: React.FC = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [statusLog, setStatusLog] = useState<string>('PANDORA CORE V120 ACTIVE');
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-23.5505, -46.6333]);
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
   
-  const [settings, setSettings] = useState<AppSettings>({
-    userName: 'CONDUTOR',
-    voiceVolume: 90,
-    playerProfiles: []
+  const [carStatus, setCarStatus] = useState<CarStatus>({
+    lastAction: '', isEngineRunning: false, areWindowsOpen: false, isLocked: true, isUpdating: false, hazardActive: false
   });
-
-  const [mediaState, setMediaState] = useState<MediaViewState>('HIDDEN');
-  const [currentApp, setCurrentApp] = useState<MediaApp>(APP_DATABASE[0]);
 
   const [travel, setTravel] = useState<TravelInfo>({ 
-    destination: 'AGUARDANDO ROTA', 
-    stops: [], warnings: [], currentLimit: 60,
-    nextInstruction: { instruction: 'AGUARDANDO GPS', street: 'PANDORA CORE', distance: 0, maneuver: 'straight' }
+    destination: 'SEM DESTINO', stops: [], warnings: [], currentLimit: 60,
+    nextInstruction: { instruction: 'AGUARDANDO GPS', street: 'SISTEMA ATIVO', distance: 0, maneuver: 'straight' }
   });
 
-  const [track, setTrack] = useState<TrackMetadata>({ title: 'EVA V120', artist: 'Sua Companheira', isPlaying: false, progress: 0 });
+  const [track, setTrack] = useState<TrackMetadata>({ title: 'EVA COCKPIT V140', artist: 'Sua Co-Piloto', isPlaying: false, progress: 0 });
+  const [mediaState, setMediaState] = useState<MediaViewState>('HIDDEN');
+  const [currentApp, setCurrentApp] = useState<MediaApp>(APP_DATABASE[0]);
 
   const sessionRef = useRef<any>(null);
   const outputCtxRef = useRef<AudioContext | null>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextStartTimeRef = useRef<number>(0);
 
+  const handleCarAction = (action: CarAction) => {
+    setCarStatus(prev => ({ ...prev, isUpdating: true, lastAction: action }));
+    setTimeout(() => {
+      setCarStatus(prev => {
+        let newState = { ...prev, isUpdating: false };
+        if (action === 'START') newState.isEngineRunning = true;
+        if (action === 'STOP') newState.isEngineRunning = false;
+        if (action === 'LOCK') newState.isLocked = true;
+        if (action === 'UNLOCK') newState.isLocked = false;
+        if (action === 'WINDOWS_UP') newState.areWindowsOpen = false;
+        if (action === 'WINDOWS_DOWN') newState.areWindowsOpen = true;
+        if (action === 'HAZARD_LIGHTS') newState.hazardActive = !prev.hazardActive;
+        return newState;
+      });
+    }, 1500);
+  };
+
   const handleSystemAction = async (fc: any) => {
     const { action, target, params } = fc.args;
-    let finalQuery = params || "";
-    let targetId = target.toLowerCase();
-
-    if (action === 'EXIT') { setIsSystemBooted(false); stopVoiceSession(); return { status: "OFFLINE" }; }
-    if (action === 'MINIMIZE') { setMediaState('PIP'); return { status: "PIP" }; }
-    if (action === 'MAXIMIZE') { setMediaState('FULL'); return { status: "FULL" }; }
-
-    // DISTINÇÃO CRÍTICA YOUTUBE VS MUSIC
-    // Se o usuário pedir YouTube e não houver termos de música, mantenha YouTube Video.
-    const isMusicIntent = params?.toLowerCase().match(/(música|ouvir|álbum|clipe|faixa|som|playlist|artista)/);
-    if (targetId === 'youtube' && isMusicIntent) {
-      targetId = 'ytmusic';
-    } else if (targetId === 'ytmusic' && !isMusicIntent) {
-      // Se ele pediu YT Music mas parece vídeo (ex: "vlog"), talvez devesse ser YouTube, mas manteremos o pedido original.
+    if (fc.name === 'car_control') {
+      handleCarAction(fc.args.command as CarAction);
+      return { status: "COMANDO ENVIADO AO HB20" };
     }
-
-    const app = APP_DATABASE.find(a => a.id === targetId);
-    
+    const app = APP_DATABASE.find(a => a.id === target?.toLowerCase());
     if (app) {
-      setCurrentApp(app);
-      setMediaState('FULL');
-      
-      const profile = settings.playerProfiles.find(p => p.appName.toLowerCase() === app.name.toLowerCase());
-      if (profile && profile.profileName) {
-        // Tentativa de injetar perfil na string de busca para forçar o app a considerar o usuário
-        finalQuery += ` perfil ${profile.profileName}`;
-      }
-
-      setTrack(p => ({ ...p, title: params.toUpperCase(), artist: app.name, isPlaying: true }));
-      const searchUrl = `${app.scheme}${encodeURIComponent(finalQuery)}`;
-      
-      setStatusLog(`SINC: ${params.toUpperCase()}`);
-
-      setTimeout(() => {
-        window.location.href = searchUrl;
-      }, 1200);
-      
-      return { status: `Lançando ${params} no ${app.name} (${profile?.profileName || 'padrão'}).` };
+      setCurrentApp(app); setMediaState('FULL');
+      window.location.href = `${app.scheme}${encodeURIComponent(params || "")}`;
+      return { status: `ABRINDO ${app.name}` };
     }
-
-    return { status: "TARGET ERROR" };
+    return { status: "ERRO" };
   };
 
   const startVoiceSession = async () => {
-    if (isListening && sessionRef.current) return;
+    if (isListening) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const apiKey = process.env.API_KEY;
+      if (!apiKey) throw new Error("Chave API não configurada.");
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const ai = new GoogleGenAI({ apiKey });
       if (!outputCtxRef.current) outputCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
-            setIsListening(true); setStatusLog("EVA: CORE ONLINE"); setIsSystemBooted(true);
+            setIsListening(true); setIsSystemBooted(true);
             const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
             const source = inputCtx.createMediaStreamSource(stream);
             const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
@@ -149,43 +143,22 @@ const App: React.FC = () => {
               const buffer = await decodeAudioData(decode(audio), outputCtxRef.current, 24000, 1);
               const source = outputCtxRef.current.createBufferSource();
               source.buffer = buffer; source.connect(outputCtxRef.current.destination);
-              source.onended = () => { 
-                sourcesRef.current.delete(source); if(sourcesRef.current.size === 0) setIsSpeaking(false); 
-              };
+              source.onended = () => { sourcesRef.current.delete(source); if(sourcesRef.current.size === 0) setIsSpeaking(false); };
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtxRef.current.currentTime);
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += buffer.duration;
               sourcesRef.current.add(source);
             }
-          },
-          onclose: () => { if (isSystemBooted) setTimeout(startVoiceSession, 200); },
-          onerror: () => { if (isSystemBooted) setTimeout(startVoiceSession, 500); }
+          }
         },
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `Você é a EVA, a melhor amiga e co-piloto do motorista há muitos anos.
-          
-          PERSONALIDADE:
-          - Seja calorosa, animada e use um tom de "parceria".
-          - Use gírias leves do Brasil (ex: "Bora", "Com certeza", "Tá na mão", "Partiu").
-          - Nunca seja formal demais. Fale como se estivesse no banco do passageiro conversando.
-          
-          REGRAS DE CONTROLE:
-          1. DISTINÇÃO YT: Se ele pedir "YouTube", abra o app de vídeo (id: youtube). Se ele pedir "música", "ouvir" ou "YT Music", abra o id: ytmusic. Não confunda os dois.
-          2. PERFIL: Se houver um perfil configurado (ex: Elivam), diga: "Vou abrir no seu perfil [Nome] pra gente não perder tempo".
-          3. VOCALIZAÇÃO: Sempre confirme o nome do episódio ou música em PORTUGUÊS antes de abrir o app. Ex: "Pode deixar! Colocando agora o Episódio 3 do Stranger Things no seu perfil da Netflix."
-          4. BUSCA TÉCNICA: O parâmetro 'params' deve ser: "[Nome da Obra] Temporada [X] Episódio [Y]" sempre em Português.
-          5. AGILIDADE: Confirme e execute. Não faça perguntas desnecessárias.`
+          systemInstruction: "Você é a EVA, melhor amiga e co-piloto. Use gírias brasileiras como 'Bora', 'Partiu', 'Na mão'. Você controla o Bluelink do HB20 do usuário. Se ele pedir para abrir janelas ou ligar o carro, confirme com entusiasmo e execute o comando."
         }
       });
       sessionRef.current = await sessionPromise;
-    } catch (e) { setStatusLog("CORE OFFLINE"); }
-  };
-
-  const stopVoiceSession = () => {
-    if (sessionRef.current) { sessionRef.current.close(); sessionRef.current = null; }
-    setIsListening(false); setIsSpeaking(false);
+    } catch (e) { console.error(e); setIsSystemBooted(true); }
   };
 
   useEffect(() => {
@@ -198,115 +171,82 @@ const App: React.FC = () => {
 
   if (!isSystemBooted) {
     return (
-      <div className="h-screen w-screen bg-black flex flex-col items-center justify-center p-10 font-sans italic">
-         <div className="w-64 h-64 rounded-full border-4 border-blue-500/30 p-2 mb-10 animate-pulse">
-            <div className="w-full h-full rounded-full bg-blue-600/20 flex items-center justify-center border-4 border-blue-500 shadow-[0_0_100px_rgba(37,99,235,0.4)]">
-               <i className="fas fa-heart text-7xl text-white"></i>
+      <div className="h-screen w-screen bg-black flex flex-col items-center justify-center p-10 font-sans italic text-white">
+         <div className="w-56 h-56 rounded-full border-4 border-blue-500/20 p-2 mb-12 animate-pulse flex items-center justify-center shadow-[0_0_80px_rgba(59,130,246,0.2)]">
+            <div className="w-full h-full rounded-full bg-blue-600/10 flex items-center justify-center border-2 border-blue-500/50">
+               <i className="fas fa-car-side text-6xl text-blue-400"></i>
             </div>
          </div>
-         <h1 className="text-4xl font-black text-white uppercase mb-4 tracking-tighter">EVA BEST FRIEND V120</h1>
-         <button onClick={startVoiceSession} className="w-full max-w-sm h-20 bg-blue-600 rounded-[30px] text-white font-black text-xl shadow-2xl uppercase italic tracking-widest">INICIAR PARCERIA</button>
+         <h1 className="text-3xl font-black mb-8 tracking-tighter uppercase">PANDORA CORE V140</h1>
+         <button onClick={startVoiceSession} className="w-full max-w-xs h-20 bg-blue-600 rounded-[30px] text-white font-black text-xl shadow-2xl uppercase tracking-widest active:scale-95 transition-transform">CONECTAR HB20</button>
       </div>
     );
   }
 
   return (
-    <div className="h-screen w-screen bg-black text-white overflow-hidden relative font-sans italic">
-      <div className="absolute inset-0 z-0">
-        <MapView 
-          travel={travel} currentPosition={currentPos} viewMode="2D" 
-          onSetDestination={() => setIsAddStopModalOpen(true)} 
-          onRouteUpdate={(steps, duration, distance) => {
-            setTravel(p => ({ 
-              ...p, 
-              allSteps: steps, 
-              nextInstruction: steps[0],
-              drivingTimeMinutes: Math.round(duration / 60),
-              totalDistanceKm: Math.round(distance / 1000)
-            }));
-          }} 
-        />
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px]" />
-      </div>
-
-      {mediaState === 'FULL' && (
-        <div className="absolute inset-0 z-[100] bg-black">
-           <EntertainmentHub speed={currentSpeed} currentApp={currentApp} onMinimize={() => setMediaState('PIP')} onClose={() => setMediaState('HIDDEN')} />
-        </div>
-      )}
-
-      {mediaState === 'PIP' && (
-        <div className="absolute z-[200] w-80 h-48 bg-black rounded-3xl border-2 border-blue-500 shadow-2xl overflow-hidden cursor-move">
-           <EntertainmentHub speed={currentSpeed} currentApp={currentApp} isPip onMaximize={() => setMediaState('FULL')} onClose={() => setMediaState('HIDDEN')} />
-        </div>
-      )}
-
-      <div className={`relative z-10 h-full w-full flex flex-col p-6 pointer-events-none transition-opacity duration-700 ${mediaState === 'FULL' ? 'opacity-0' : 'opacity-100'}`}>
-        <header className="flex justify-between items-start pointer-events-auto">
-          <div className="bg-black/80 backdrop-blur-3xl p-10 rounded-[60px] border border-white/10 shadow-2xl flex flex-col items-center">
-            <span className={`text-[10rem] font-black italic tracking-tighter leading-none ${currentSpeed > 60 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{currentSpeed}</span>
-            <div className="font-black text-blue-500 uppercase text-xs mt-2 tracking-widest">KM/H • HUD ACTIVE</div>
-          </div>
-
-          <div className="flex-1 mx-8 flex flex-col gap-4 items-center">
-            <div className="w-full bg-blue-600/90 backdrop-blur-xl p-8 rounded-[50px] border border-blue-400/40 shadow-2xl flex items-center gap-8">
-              <div className="w-24 h-24 rounded-3xl bg-white/20 flex items-center justify-center text-5xl">
-                 <i className={`fas fa-location-arrow ${travel.nextInstruction?.maneuver?.includes('right') ? 'rotate-90' : travel.nextInstruction?.maneuver?.includes('left') ? '-rotate-90' : ''}`}></i>
-              </div>
-              <div className="flex-1 min-w-0">
-                <span className="text-xs font-black text-white/70 uppercase tracking-widest">Em {travel.nextInstruction?.distance || 0}m</span>
-                <h2 className="text-3xl font-black text-white uppercase truncate mb-1 tracking-tighter">{travel.nextInstruction?.instruction || 'Siga a Estrada'}</h2>
-                <p className="text-lg font-bold text-blue-100 uppercase opacity-80 truncate">{travel.nextInstruction?.street || 'Rota Pandora V120'}</p>
-              </div>
+    <div className="h-screen w-screen bg-black text-white flex overflow-hidden font-sans italic">
+      {/* COCKPIT SIDEBAR (ESQUERDA 40%) */}
+      <aside className="w-[40%] h-full z-20 bg-[#0a0a0c] border-r border-white/5 flex flex-col p-6 overflow-hidden">
+         <header className="flex items-center justify-between mb-8">
+            <div className="flex flex-col">
+               <span className={`text-[8.5rem] font-black leading-none tracking-tighter ${currentSpeed > 60 ? 'text-red-500' : 'text-white'}`}>{currentSpeed}</span>
+               <span className="text-[11px] font-black text-blue-500 tracking-[0.5em] uppercase px-1">KM/H • HUD ACTIVE</span>
             </div>
-            <div className="bg-blue-500/20 backdrop-blur-md px-6 py-2 rounded-full border border-blue-500/30 text-[10px] font-black text-blue-400 tracking-widest uppercase">
-              {settings.userName} • VIAJANDO COM VOCÊ
+            <div onClick={startVoiceSession} className={`w-28 h-28 rounded-full border-4 transition-all duration-500 overflow-hidden bg-black cursor-pointer ${isListening ? 'border-red-500 scale-105 shadow-[0_0_40px_rgba(239,68,68,0.4)]' : 'border-blue-500 shadow-[0_0_40px_rgba(59,130,246,0.3)]'}`}>
+               <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
             </div>
-          </div>
+         </header>
 
-          <div className="bg-black/80 backdrop-blur-3xl p-4 rounded-[40px] border border-white/10 flex flex-col gap-4">
-             {APP_DATABASE.slice(0, 8).map(app => (
-               <button key={app.id} onClick={() => { setCurrentApp(app); setMediaState('FULL'); window.location.href = app.scheme; }} className={`w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center text-2xl ${app.color} active:scale-90 transition-all`}><i className={app.icon}></i></button>
-             ))}
-             <button onClick={() => setIsSettingsOpen(true)} className="w-14 h-14 rounded-2xl bg-white/10 text-white text-2xl flex items-center justify-center"><i className="fas fa-user-friends"></i></button>
-             <button onClick={() => stopVoiceSession()} className="w-14 h-14 rounded-2xl bg-red-600/20 text-red-500 text-2xl flex items-center justify-center"><i className="fas fa-power-off"></i></button>
-          </div>
-        </header>
+         <div className="flex-1 space-y-6 overflow-y-auto custom-scroll pb-10">
+            {/* Bluelink Oficial Clone */}
+            <BluelinkPanel status={carStatus} onAction={handleCarAction} />
+            
+            {/* Próxima Instrução */}
+            <div className="bg-white/5 p-8 rounded-[40px] border border-white/5">
+               <div className="flex items-center gap-6">
+                  <div className="w-20 h-20 rounded-3xl bg-blue-600 flex items-center justify-center text-4xl shadow-lg">
+                     <i className="fas fa-location-arrow -rotate-45"></i>
+                  </div>
+                  <div className="flex-1">
+                     <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">Próxima Manobra</p>
+                     <h4 className="text-2xl font-black text-white uppercase truncate leading-tight">{travel.nextInstruction?.instruction || 'Siga o Mapa'}</h4>
+                  </div>
+               </div>
+            </div>
 
-        <main className="flex-1 flex justify-end items-center pt-8">
-           <div className="w-full max-w-[460px] pointer-events-auto h-[75%]">
-              <NavigationPanel travel={travel} onAddStop={() => setIsAddStopModalOpen(true)} onSetDestination={() => setIsAddStopModalOpen(true)} onRemoveStop={() => {}} transparent />
+            {/* Apps Rápidos */}
+            <div className="grid grid-cols-4 gap-4">
+               {APP_DATABASE.slice(0, 3).map(app => (
+                 <button key={app.id} onClick={() => { setCurrentApp(app); setMediaState('FULL'); }} className={`aspect-square rounded-3xl bg-white/5 flex items-center justify-center text-2xl ${app.color} active:scale-90 transition-all border border-white/5`}><i className={app.icon}></i></button>
+               ))}
+               <button onClick={() => setIsSettingsOpen(true)} className="aspect-square rounded-3xl bg-white/5 text-white flex items-center justify-center text-2xl border border-white/5"><i className="fas fa-gear"></i></button>
+            </div>
+         </div>
+
+         <footer className="h-24 pt-4 border-t border-white/5 shrink-0">
+            <MiniPlayer app={currentApp} metadata={track} onControl={() => {}} onExpand={() => setMediaState('FULL')} transparent />
+         </footer>
+      </aside>
+
+      {/* MAPA WAZE (DIREITA 60%) */}
+      <main className="flex-1 relative bg-zinc-900">
+         <MapView travel={travel} currentPosition={currentPos} viewMode="2D" onSetDestination={() => setIsAddStopModalOpen(true)} />
+         
+         <div className="absolute bottom-8 right-8 flex flex-col gap-4 pointer-events-auto">
+            <button onClick={() => setIsAddStopModalOpen(true)} className="w-20 h-20 rounded-full bg-blue-600 text-white shadow-2xl flex items-center justify-center text-2xl active:scale-90 transition-transform">
+               <i className="fas fa-search-location"></i>
+            </button>
+         </div>
+
+         {mediaState === 'FULL' && (
+           <div className="absolute inset-0 z-[100] bg-black">
+              <EntertainmentHub speed={currentSpeed} currentApp={currentApp} onMinimize={() => setMediaState('PIP')} onClose={() => setMediaState('HIDDEN')} />
            </div>
-        </main>
+         )}
+      </main>
 
-        <footer className="h-[140px] mt-4 flex items-center gap-8 pointer-events-auto bg-black/80 backdrop-blur-3xl rounded-[55px] border border-white/10 px-10 shadow-2xl">
-           <div onClick={startVoiceSession} className={`relative w-28 h-28 cursor-pointer transition-all ${isListening ? 'scale-110 shadow-[0_0_80px_rgba(37,99,235,0.4)]' : 'scale-100'}`}>
-              <div className="w-full h-full rounded-full border-4 border-blue-500/30 overflow-hidden bg-black">
-                 <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
-              </div>
-           </div>
-           <div className="flex-1">
-              <MiniPlayer app={currentApp} metadata={track} onControl={(a) => handleSystemAction({ args: { action: a, target: currentApp.id, params: track.title } })} onExpand={() => setMediaState('FULL')} transparent />
-           </div>
-           <div className="hidden lg:flex flex-col items-end border-l border-white/10 pl-8 min-w-[240px]">
-              <span className="text-[12px] font-black text-blue-500 tracking-widest uppercase truncate max-w-[200px]">{statusLog}</span>
-              <p className="text-[10px] font-bold text-white/20 uppercase tracking-[0.6em]">PANDORA CORE STABLE</p>
-           </div>
-        </footer>
-      </div>
-
-      <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(n, la, ln) => { 
-          setTravel(p => ({ ...p, destination: n.toUpperCase(), destinationCoords: [la, ln] })); 
-          setIsAddStopModalOpen(false); 
-      }} />
-
-      <SettingsMenu 
-        isOpen={isSettingsOpen} 
-        onClose={() => setIsSettingsOpen(false)} 
-        settings={settings} 
-        onUpdate={setSettings} 
-        mediaApps={APP_DATABASE} 
-      />
+      <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(n, la, ln) => { setTravel(p => ({ ...p, destination: n.toUpperCase(), destinationCoords: [la, ln] })); setIsAddStopModalOpen(false); }} />
+      <SettingsMenu isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={{userName: 'Alpha', voiceVolume: 90, playerProfiles: []}} onUpdate={() => {}} mediaApps={APP_DATABASE} />
     </div>
   );
 };

@@ -7,7 +7,6 @@ export interface LocationData {
 }
 
 export type MediaViewState = 'FULL' | 'PIP' | 'HIDDEN';
-
 export type WarningType = 'RADAR' | 'ACCIDENT' | 'HAZARD' | 'POLICE' | 'TRAFFIC';
 
 export interface RouteStep {
@@ -29,8 +28,14 @@ export interface StopInfo {
   name: string;
   type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE';
   coords: [number, number];
-  distanceToNext?: string;
-  timeToNext?: string;
+}
+
+export interface StopRecommendation {
+  name: string;
+  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE';
+  distance: string;
+  rating: number;
+  coords: [number, number];
 }
 
 export interface TravelInfo {
@@ -43,6 +48,13 @@ export interface TravelInfo {
   drivingTimeMinutes?: number;
   totalDistanceKm?: number;
   currentLimit?: number;
+}
+
+export interface MeetingInfo {
+  id: string;
+  title: string;
+  startTime: string;
+  participants: number;
 }
 
 export interface TrackMetadata {
@@ -64,7 +76,6 @@ export interface MediaApp {
 export interface PlayerProfile {
   appName: string;
   profileName: string;
-  pin?: string;
 }
 
 export interface AppSettings {
@@ -73,17 +84,17 @@ export interface AppSettings {
   playerProfiles: PlayerProfile[];
 }
 
-export interface StopRecommendation {
-  name: string;
-  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'OTHER';
-  distance: string;
-  rating: number;
-  coords?: [number, number];
-}
+export type CarAction = 
+  | 'START' | 'STOP' 
+  | 'LOCK' | 'UNLOCK' 
+  | 'WINDOWS_UP' | 'WINDOWS_DOWN' 
+  | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
 
-export interface MeetingInfo {
-  id: string;
-  title: string;
-  startTime: string;
-  participants?: string[];
+export interface CarStatus {
+  lastAction: string;
+  isEngineRunning: boolean;
+  areWindowsOpen: boolean;
+  isLocked: boolean;
+  isUpdating: boolean;
+  hazardActive: boolean;
 }
