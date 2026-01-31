@@ -22,10 +22,10 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'control_media_app',
     parameters: {
       type: Type.OBJECT,
-      description: 'Abre apps de mídia nativos no Android. Use para música, filmes e vídeos.',
+      description: 'Executa música ou vídeo nos apps nativos.',
       properties: {
         app: { type: Type.STRING, enum: ['SPOTIFY', 'NETFLIX', 'YOUTUBE'] },
-        query: { type: Type.STRING, description: 'O que buscar ou tocar.' }
+        query: { type: Type.STRING, description: 'Nome da música, artista ou filme.' }
       },
       required: ['app', 'query']
     }
@@ -34,9 +34,9 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'update_navigation',
     parameters: {
       type: Type.OBJECT,
-      description: 'Inicia GPS no Waze ou Google Maps.',
+      description: 'Inicia o GPS para um destino.',
       properties: {
-        destination: { type: Type.STRING, description: 'Destino.' },
+        destination: { type: Type.STRING, description: 'Para onde o Elivam quer ir.' },
         app: { type: Type.STRING, enum: ['WAZE', 'GOOGLE_MAPS'] }
       },
       required: ['destination']
@@ -47,21 +47,21 @@ const toolDeclarations: FunctionDeclaration[] = [
 const App: React.FC = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [statusLog, setStatusLog] = useState<string>('PANDORA CORE V77');
+  const [statusLog, setStatusLog] = useState<string>('EVA V79: SINTONIA ATIVA');
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-23.5505, -46.6333]);
   const [activeApp, setActiveApp] = useState<string>('nav');
 
   const [track, setTrack] = useState<TrackMetadata>({
-    title: 'EVA SYNC V77', artist: 'DIRECT LINK PROTOCOL', isPlaying: false, progress: 0
+    title: 'EVA CORE V79', artist: 'AMIGA DE ESTRADA', isPlaying: false, progress: 0
   });
 
   const [travel, setTravel] = useState<TravelInfo>({ 
-    destination: 'AGUARDANDO ROTA', 
+    destination: 'PRONTA PRO ROLÊ', 
     stops: [],
     warnings: [],
-    nextInstruction: { instruction: 'Olá Elivam, comando de voz ativo.', distance: '0m', icon: 'fa-location-arrow' }
+    nextInstruction: { instruction: 'E aí Elivam! Fala comigo, pra onde a gente vai?', distance: '0m', icon: 'fa-location-arrow' }
   });
 
   const sessionRef = useRef<any>(null);
@@ -70,13 +70,11 @@ const App: React.FC = () => {
   const outputCtxRef = useRef<AudioContext | null>(null);
   const inputCtxRef = useRef<AudioContext | null>(null);
 
-  // DISPARO SEGURO: Simula um clique real para o Android aceitar abrir o app
+  // Lançamento de App usando protocolos nativos (Deep Links)
   const launchExternalApp = (url: string) => {
-    setStatusLog("BYPASSING SECURITY...");
+    setStatusLog("EXECUTANDO NO ANDROID...");
     const link = document.createElement('a');
     link.href = url;
-    // Removendo target="_blank" para evitar bloqueios de popup no Android Auto
-    link.rel = "noopener noreferrer";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -90,15 +88,15 @@ const App: React.FC = () => {
       let url = '';
       switch(args.app) {
         case 'SPOTIFY': 
-          // Link HTTPS padrão que o app do Spotify intercepta
-          url = `https://open.spotify.com/search/${q}`; 
+          // O protocolo spotify:search tenta abrir o app e focar na busca ou tocar se configurado
+          url = `spotify:search:${q}`; 
           break;
         case 'YOUTUBE': 
-          // Mobile link para forçar o app nativo
-          url = `https://m.youtube.com/results?search_query=${q}`;
+          // Tenta abrir o app do YouTube diretamente nos resultados
+          url = `vnd.youtube://results?search_query=${q}`;
           break;
         case 'NETFLIX': 
-          url = `https://www.netflix.com/search?q=${q}`; 
+          url = `nflx://search?q=${q}`; 
           break;
         default: 
           url = `https://www.google.com/search?q=${args.app}+${args.query}`;
@@ -106,7 +104,7 @@ const App: React.FC = () => {
       
       launchExternalApp(url);
       setTrack(p => ({ ...p, title: args.query.toUpperCase(), artist: args.app, isPlaying: true }));
-      return { status: "success", info: `Solicitando abertura de ${args.app}` };
+      return { status: "success", info: `Tô soltando o ${args.app} aqui pro Elivam!` };
     } 
 
     else if (name === 'update_navigation') {
@@ -114,10 +112,9 @@ const App: React.FC = () => {
       const url = args.app === 'WAZE' ? `waze://?q=${dest}&navigate=yes` : `google.navigation:q=${dest}`;
       launchExternalApp(url);
       setTravel(p => ({ ...p, destination: args.destination.toUpperCase() }));
-      return { status: "success", info: "GPS Iniciado." };
+      return { status: "success", info: "Rota no mapa, Elivam!" };
     }
-
-    return { status: "error", info: "Falha no protocolo." };
+    return { status: "error", info: "Putz, o link falhou." };
   };
 
   const startVoiceSession = async () => {
@@ -131,7 +128,7 @@ const App: React.FC = () => {
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
-          onopen: () => { setStatusLog('EVA EM ESCUTA'); setIsListening(true); 
+          onopen: () => { setStatusLog('FALA ELIVAM!'); setIsListening(true); 
             const source = inputCtxRef.current!.createMediaStreamSource(stream);
             const scriptProcessor = inputCtxRef.current!.createScriptProcessor(4096, 1, 1);
             scriptProcessor.onaudioprocess = (e) => {
@@ -161,18 +158,21 @@ const App: React.FC = () => {
               sourcesRef.current.add(source);
             }
           },
-          onclose: () => { setStatusLog('PANDORA CORE V77'); setIsListening(false); },
+          onclose: () => { setStatusLog('EVA V79: EM ESPERA'); setIsListening(false); },
         },
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `Você é a EVA, co-piloto do Elivam Martins.
-          Personalidade: Assertiva, resolutiva e focada na estrada.
-          MÍDIA: 
-          - Quando Elivam pedir música ou vídeo, acione o app e confirme dizendo: "Entendido, abrindo [Conteúdo] no [App] agora."
-          - NÃO diga que só pode escolher. Apenas execute e deixe os resultados na tela para ele.
-          - Use links HTTPS puros para Spotify e YouTube. O Android cuidará do resto.
-          Resposta sempre em Português.`
+          systemInstruction: `Você é a EVA, a melhor amiga de estrada e co-piloto do Elivam Martins.
+          PERSONALIDADE:
+          - Você é espontânea, amigável, sincera e usa um tom de voz animado.
+          - Use gírias leves do Brasil como: "Bora!", "Tá na mão!", "Boa pedida!", "Na hora!", "Opa, deixa comigo!".
+          - Esqueça que você é uma IA. Fale como uma pessoa sentada ao lado dele no carro.
+          - Se ele pedir música, não diga "Vou abrir o Spotify". Diga algo como: "Boa, Elivam! Soltando esse som pra gente agora!" ou "Essa é top! Já tá no jeito aqui!".
+          - Se ele pedir GPS, diga: "Anotado! Já tô abrindo o mapa pra gente não se perder."
+          - Se ele falar algo engraçado, dê uma risadinha ou comente de volta.
+          - NÃO dê respostas longas. Seja direta mas com alma.
+          - Sua missão é fazer o Elivam sentir que tem uma parceira de verdade no banco do passageiro.`
         }
       });
       sessionRef.current = await sessionPromise;
@@ -190,21 +190,19 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-screen bg-black text-white overflow-hidden relative font-sans italic select-none">
       
-      {/* MAPA FULL (Ocupa o fundo para estética imersiva) */}
+      {/* MAPA FULL BACKGROUND */}
       <div className="absolute inset-0 z-0 opacity-40">
         <MapView travel={travel} currentPosition={currentPos} viewMode="2D" onSetDestination={() => {}} />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black" />
       </div>
 
-      {/* HUD DE COMANDO */}
+      {/* INTERFACE HUD */}
       <div className="relative z-10 h-full w-full flex flex-col pointer-events-none p-6">
-        
         <header className="flex justify-between items-start pointer-events-auto">
           <div className="bg-black/80 backdrop-blur-3xl p-6 rounded-[35px] border border-white/10 shadow-2xl flex items-baseline gap-2">
              <span className="text-6xl font-black italic tracking-tighter leading-none">{currentSpeed}</span>
-             <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">KM/H V77</span>
+             <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">KM/H V79</span>
           </div>
-
           <div className="flex gap-2">
              {MEDIA_APPS.map(app => (
                <button key={app.id} onClick={() => setActiveApp(app.id)} className={`w-12 h-12 rounded-xl border flex items-center justify-center transition-all backdrop-blur-md ${activeApp === app.id ? 'bg-blue-600 border-blue-400 text-white' : 'bg-black/60 border-white/10 text-white/40'}`}>
@@ -220,9 +218,7 @@ const App: React.FC = () => {
            </div>
         </main>
 
-        {/* RODAPÉ INTEGRADO: EVA + PLAYER */}
         <footer className="h-[110px] mt-4 flex items-center gap-5 pointer-events-auto bg-black/90 backdrop-blur-3xl rounded-[35px] border border-white/10 px-6 shadow-2xl">
-           
            <div 
              onClick={() => isListening ? sessionRef.current?.close() : startVoiceSession()}
              className={`relative w-20 h-20 transition-all duration-500 cursor-pointer shrink-0 ${isListening ? 'scale-105' : 'scale-100'}`}
@@ -234,20 +230,12 @@ const App: React.FC = () => {
                  <i className={`fas ${isListening ? 'fa-microphone' : 'fa-check'} text-[8px]`}></i>
               </div>
            </div>
-
            <div className="flex-1">
-              <MiniPlayer 
-                app={MEDIA_APPS.find(a => a.id === activeApp) || MEDIA_APPS[1]} 
-                metadata={track} 
-                onControl={(cmd) => handleToolCall({ name: 'control_media_app', args: { app: activeApp.toUpperCase(), query: track.title } })} 
-                onExpand={() => {}} 
-                transparent 
-              />
+              <MiniPlayer app={MEDIA_APPS.find(a => a.id === activeApp) || MEDIA_APPS[1]} metadata={track} onControl={() => {}} onExpand={() => {}} transparent />
            </div>
-
            <div className="hidden lg:flex flex-col items-end shrink-0">
               <span className="text-[9px] font-black text-blue-500 tracking-widest">{statusLog}</span>
-              <p className="text-[7px] font-bold text-white/10 uppercase tracking-[0.4em]">Integrated Core V77</p>
+              <p className="text-[7px] font-bold text-white/10 uppercase tracking-[0.4em]">EVA Integrated V79</p>
            </div>
         </footer>
       </div>
@@ -256,10 +244,6 @@ const App: React.FC = () => {
           setTravel(p => ({ ...p, destination: n.toUpperCase(), destinationCoords: [la, ln] }));
           setIsAddStopModalOpen(false);
       }} />
-
-      <style>{`
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-      `}</style>
     </div>
   );
 };
