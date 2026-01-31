@@ -18,9 +18,14 @@ const APP_DATABASE: MediaApp[] = [
   { id: 'netflix', name: 'Netflix', icon: 'fas fa-film', color: 'text-red-700', category: 'VIDEO', scheme: 'https://www.netflix.com/search?q=' },
   { id: 'globoplay', name: 'Globoplay', icon: 'fas fa-play', color: 'text-white', category: 'VIDEO', scheme: 'https://globoplay.globo.com/busca/?q=' },
   { id: 'max', name: 'Max', icon: 'fas fa-star', color: 'text-blue-600', category: 'VIDEO', scheme: 'https://www.max.com/search/' },
-  { id: 'prime', name: 'Prime Video', icon: 'fab fa-amazon', color: 'text-blue-400', category: 'VIDEO', scheme: 'https://www.primevideo.com/search?phrase=' },
   { id: 'waze', name: 'Waze', icon: 'fab fa-waze', color: 'text-[#33CCFF]', category: 'NAV', scheme: 'waze://?q=' },
 ];
+
+const ORDINAL_MAP: Record<string, string> = {
+  "primeiro": "1", "segundo": "2", "terceiro": "3", "quarto": "4", "quinto": "5",
+  "sexto": "6", "sétimo": "7", "oitavo": "8", "nono": "9", "décimo": "10",
+  "último": "último", "penúltimo": "penúltimo", "próximo": "próximo", "anterior": "anterior"
+};
 
 const toolDeclarations: FunctionDeclaration[] = [
   {
@@ -31,7 +36,7 @@ const toolDeclarations: FunctionDeclaration[] = [
       properties: {
         action: { type: Type.STRING, enum: ['OPEN', 'PLAY', 'NAVIGATE', 'MINIMIZE', 'MAXIMIZE', 'CLOSE_MEDIA', 'EXIT'] },
         target: { type: Type.STRING, description: 'App ou Destino.' },
-        params: { type: Type.STRING, description: 'Título exato da mídia ou endereço.' }
+        params: { type: Type.STRING, description: 'Termo de busca (música, série ou número do episódio).' }
       },
       required: ['action', 'target']
     }
@@ -50,6 +55,8 @@ const App: React.FC = () => {
   const [mediaState, setMediaState] = useState<MediaViewState>('HIDDEN');
   const [pipPos, setPipPos] = useState({ x: 20, y: window.innerHeight - 320 });
   const [currentApp, setCurrentApp] = useState<MediaApp>(APP_DATABASE[0]);
+  
+  const lastMediaRef = useRef<{ title: string, app: string, lastEp?: string }>({ title: '', app: '' });
 
   const [travel, setTravel] = useState<TravelInfo>({ 
     destination: 'AGUARDANDO DESTINO', 
@@ -66,38 +73,76 @@ const App: React.FC = () => {
 
   const handleSystemAction = async (fc: any) => {
     const { action, target, params } = fc.args;
-    // Sanitização profunda: remove "o filme", "a música", "assistir", "chamado", etc para busca direta
-    const cleanParams = (params || target).replace(/abrir|assistir|tocar|no|o|a|para|filme|música|vídeo|chamado/gi, '').trim();
-    
+    let finalQuery = params || target || "";
+    let isEpisodeRequest = false;
+
+    // PROCESSAMENTO DE ORDINAIS E EPISÓDIOS
+    const words = finalQuery.toLowerCase().split(' ');
+    let episodeModifier = "";
+
+    words.forEach(word => {
+      if (ORDINAL_MAP[word]) {
+        episodeModifier = `episódio ${ORDINAL_MAP[word]}`;
+        isEpisodeRequest = true;
+      }
+    });
+
+    if (finalQuery.toLowerCase().includes("episódio") || finalQuery.toLowerCase().includes("capítulo")) {
+      isEpisodeRequest = true;
+    }
+
+    // Lógica de Contexto para "próximo", "anterior" ou apenas o número do episódio
+    if (isEpisodeRequest && lastMediaRef.current.title && !finalQuery.toLowerCase().includes(lastMediaRef.current.title.toLowerCase())) {
+       finalQuery = `${lastMediaRef.current.title} ${episodeModifier || finalQuery}`;
+    } else if (isEpisodeRequest && episodeModifier) {
+       // Se já tem o nome da série mas usou ordinal, injetamos a palavra mágica "episódio"
+       const baseTitle = finalQuery.replace(/primeiro|segundo|terceiro|quarto|quinto|sexto|sétimo|oitavo|nono|décimo|último|penúltimo/gi, '').trim();
+       finalQuery = `${baseTitle} ${episodeModifier}`;
+    }
+
+    // Sanitização final para players
+    const cleanSearch = finalQuery.replace(/abrir|assistir|tocar|no|o|a|para|filme|música|vídeo/gi, '').trim();
+
     if (action === 'EXIT') { setIsSystemBooted(false); stopVoiceSession(); return { status: "Encerrando." }; }
-    if (action === 'MINIMIZE') { setMediaState('PIP'); return { status: "Modo PIP." }; }
+    if (action === 'MINIMIZE') { setMediaState('PIP'); return { status: "Minimizado." }; }
     if (action === 'MAXIMIZE') { setMediaState('FULL'); return { status: "Tela cheia." }; }
-    if (action === 'CLOSE_MEDIA') { setMediaState('HIDDEN'); return { status: "Mídia fechada." }; }
 
     if (action === 'NAVIGATE') {
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cleanParams)}&limit=1`);
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cleanSearch)}&limit=1`);
         const data = await res.json();
         if (data[0]) {
           const coords: [number, number] = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-          setTravel(p => ({ ...p, destination: cleanParams.toUpperCase(), destinationCoords: coords }));
-          window.open(`waze://?q=${encodeURIComponent(cleanParams)}&navigate=yes`, '_system');
-          return { status: `Rota para ${cleanParams} iniciada. Telemetria e radares sincronizados no HUD.` };
+          setTravel(p => ({ ...p, destination: cleanSearch.toUpperCase(), destinationCoords: coords }));
+          window.open(`waze://?q=${encodeURIComponent(cleanSearch)}&navigate=yes`, '_system');
+          return { status: `GPS ajustado para ${cleanSearch}.` };
         }
-      } catch (e) { return { status: "Busca de mapa falhou." }; }
+      } catch (e) { return { status: "Erro de mapa." }; }
     }
 
     const app = APP_DATABASE.find(a => a.name.toLowerCase().includes(target.toLowerCase()) || a.id === target.toLowerCase());
+    
     if (app) {
       setCurrentApp(app);
       setMediaState('FULL');
-      const finalUrl = `${app.scheme}${encodeURIComponent(params || target)}`;
+      
+      // Armazena contexto (tira o sufixo de episódio para manter apenas o nome da série na memória)
+      const seriesNameOnly = cleanSearch.split(/episódio|capítulo/i)[0].trim();
+      if (seriesNameOnly.length > 2) {
+        lastMediaRef.current = { title: seriesNameOnly, app: app.id };
+      }
+
+      setTrack(p => ({ ...p, title: cleanSearch.toUpperCase(), artist: app.name, isPlaying: true }));
+      
+      const finalUrl = `${app.scheme}${encodeURIComponent(cleanSearch)}`;
       window.open(finalUrl, '_system');
-      setTrack(p => ({ ...p, title: (params || target).toUpperCase(), artist: app.name, isPlaying: true }));
-      return { status: `Na mão! Abrindo ${app.name} para você.` };
+      
+      setStatusLog(`MÍDIA: ${cleanSearch.toUpperCase()}`);
+      
+      return { status: `Entendido! Localizando o ${cleanSearch} no ${app.name} agora.` };
     }
 
-    return { status: "Comando executado." };
+    return { status: "OK." };
   };
 
   const startVoiceSession = async () => {
@@ -111,7 +156,7 @@ const App: React.FC = () => {
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
-            setIsListening(true); setStatusLog("EVA: ONLINE"); setIsSystemBooted(true);
+            setIsListening(true); setStatusLog("EVA: CORE ONLINE"); setIsSystemBooted(true);
             const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
             const source = inputCtx.createMediaStreamSource(stream);
             const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
@@ -148,17 +193,17 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `Você é a assistente EVA CORE V100.
-          Sua missão é controlar o carro via comandos system_action.
-          REGRAS:
-          1. Se pedirem "O Chamado 2", chame system_action com params: "O Chamado 2". Não adicione ruídos.
-          2. Quando uma rota for traçada, SEMPRE diga a distância total e se há radares.
-          3. Use gírias: "bora", "ta na mão", "já foi".
-          4. Spotify, Netflix e YouTube devem ser abertos imediatamente.`
+          systemInstruction: `Você é a EVA V100. Sua função é controlar o entretenimento do carro.
+          IMPORTANTE:
+          1. Se o motorista pedir um episódio por ordem (ex: "coloque o quinto de Grey's Anatomy"), você deve chamar system_action com params="Grey's Anatomy episódio 5".
+          2. Use SEMPRE a palavra "episódio" quando se tratar de séries para facilitar a busca nos apps.
+          3. Você entende ordinais: primeiro=1, segundo=2, décimo=10, etc.
+          4. Se o motorista disser apenas "próximo" ou "anterior" enquanto uma série toca, presuma que é o próximo episódio daquela série.
+          5. Seja rápida, motoristas não gostam de conversa longa.`
         }
       });
       sessionRef.current = await sessionPromise;
-    } catch (e) { setStatusLog("ERRO DE VOZ"); }
+    } catch (e) { setStatusLog("ERRO DE CONEXÃO"); }
   };
 
   const stopVoiceSession = () => {
@@ -179,11 +224,11 @@ const App: React.FC = () => {
       <div className="h-screen w-screen bg-black flex flex-col items-center justify-center p-10 font-sans italic">
          <div className="w-64 h-64 rounded-full border-4 border-blue-500/30 p-2 mb-10 animate-pulse">
             <div className="w-full h-full rounded-full bg-blue-600/20 flex items-center justify-center border-4 border-blue-500 shadow-[0_0_100px_rgba(37,99,235,0.4)]">
-               <i className="fas fa-microchip text-7xl text-white"></i>
+               <i className="fas fa-layer-group text-7xl text-white"></i>
             </div>
          </div>
          <h1 className="text-4xl font-black text-white uppercase mb-4 tracking-tighter">EVA CORE V100</h1>
-         <button onClick={startVoiceSession} className="w-full max-w-sm h-20 bg-blue-600 rounded-[30px] text-white font-black text-xl shadow-2xl uppercase tracking-widest">ATIVAR PANDORA</button>
+         <button onClick={startVoiceSession} className="w-full max-w-sm h-20 bg-blue-600 rounded-[30px] text-white font-black text-xl shadow-2xl uppercase">BOOT PANDORA</button>
       </div>
     );
   }
@@ -195,22 +240,16 @@ const App: React.FC = () => {
           travel={travel} currentPosition={currentPos} viewMode="2D" 
           onSetDestination={() => setIsAddStopModalOpen(true)} 
           onRouteUpdate={(steps, duration, distance) => {
-            const simulatedWarnings: RouteWarning[] = [
-              { id: 'r1', type: 'RADAR', distance: 350, description: 'Radar 60km/h', coords: [currentPos[0]+0.001, currentPos[1]+0.001] },
-              { id: 'r2', type: 'TRAFFIC', distance: 1200, description: 'Fluxo Intenso', coords: [currentPos[0]+0.005, currentPos[1]+0.005] }
-            ];
             setTravel(p => ({ 
               ...p, 
               allSteps: steps, 
               nextInstruction: steps[0],
-              warnings: simulatedWarnings,
               drivingTimeMinutes: Math.round(duration / 60),
               totalDistanceKm: Math.round(distance / 1000)
             }));
-            setStatusLog(`${Math.round(distance/1000)}KM ATÉ O DESTINO`);
           }} 
         />
-        <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" />
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-[1px]" />
       </div>
 
       {mediaState === 'FULL' && (
@@ -232,8 +271,8 @@ const App: React.FC = () => {
       <div className={`relative z-10 h-full w-full flex flex-col p-6 pointer-events-none transition-opacity duration-700 ${mediaState === 'FULL' ? 'opacity-0' : 'opacity-100'}`}>
         <header className="flex justify-between items-start pointer-events-auto">
           <div className="bg-black/80 backdrop-blur-3xl p-10 rounded-[60px] border border-white/10 shadow-2xl flex flex-col items-center">
-            <span className={`text-[10rem] font-black italic tracking-tighter leading-none ${currentSpeed > 60 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{currentSpeed}</span>
-            <div className="font-black text-blue-500 uppercase text-xs mt-2">KM/H • LIMITE 60</div>
+            <span className={`text-[10rem] font-black italic tracking-tighter leading-none ${currentSpeed > 60 ? 'text-red-500' : 'text-white'}`}>{currentSpeed}</span>
+            <div className="font-black text-blue-500 uppercase text-xs mt-2 tracking-widest">KM/H • HUD SYNC</div>
           </div>
 
           <div className="flex-1 mx-8">
@@ -242,15 +281,15 @@ const App: React.FC = () => {
                  <i className={`fas fa-arrow-turn-up ${travel.nextInstruction?.maneuver?.includes('right') ? 'rotate-90' : travel.nextInstruction?.maneuver?.includes('left') ? '-rotate-90' : ''}`}></i>
               </div>
               <div className="flex-1 min-w-0">
-                <span className="text-xs font-black text-white/70 uppercase">Em {travel.nextInstruction?.distance || 0}m</span>
-                <h2 className="text-3xl font-black text-white uppercase truncate">{travel.nextInstruction?.instruction || 'Mantenha a Via'}</h2>
+                <span className="text-xs font-black text-white/70 uppercase">Faltam {travel.nextInstruction?.distance || 0}m</span>
+                <h2 className="text-3xl font-black text-white uppercase truncate leading-none mb-1">{travel.nextInstruction?.instruction || 'Siga no Trecho'}</h2>
                 <p className="text-lg font-bold text-blue-100 uppercase opacity-80 truncate">{travel.nextInstruction?.street || 'Rota Pandora V100'}</p>
               </div>
             </div>
           </div>
 
           <div className="bg-black/80 backdrop-blur-3xl p-4 rounded-[40px] border border-white/10 flex flex-col gap-4">
-             {APP_DATABASE.slice(0, 6).map(app => (
+             {APP_DATABASE.slice(0, 7).map(app => (
                <button key={app.id} onClick={() => { setCurrentApp(app); setMediaState('FULL'); window.open(app.scheme, '_system'); }} className={`w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center text-2xl ${app.color} active:scale-90 transition-all`}><i className={app.icon}></i></button>
              ))}
              <button onClick={() => stopVoiceSession()} className="w-14 h-14 rounded-2xl bg-red-600/20 text-red-500 text-2xl flex items-center justify-center"><i className="fas fa-power-off"></i></button>
