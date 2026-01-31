@@ -22,33 +22,21 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'control_media_app',
     parameters: {
       type: Type.OBJECT,
-      description: 'Aciona apps de mídia. Use PLAY para tentar reprodução direta via comando de sistema.',
+      description: 'Abre apps de mídia nativos no Android. Use para música, filmes e vídeos.',
       properties: {
-        app: { type: Type.STRING, enum: ['SPOTIFY', 'NETFLIX', 'PRIME', 'YOUTUBE'] },
-        query: { type: Type.STRING, description: 'O que tocar. Ex: "Track:Bohemian Rhapsody Artist:Queen".' },
-        action: { type: Type.STRING, enum: ['PLAY', 'SEARCH'] }
+        app: { type: Type.STRING, enum: ['SPOTIFY', 'NETFLIX', 'YOUTUBE'] },
+        query: { type: Type.STRING, description: 'O que buscar ou tocar.' }
       },
-      required: ['app', 'query', 'action']
-    }
-  },
-  {
-    name: 'media_transport',
-    parameters: {
-      type: Type.OBJECT,
-      description: 'Controle básico de transporte (play/pause).',
-      properties: {
-        command: { type: Type.STRING, enum: ['PLAY', 'PAUSE', 'NEXT', 'PREVIOUS', 'STOP'] }
-      },
-      required: ['command']
+      required: ['app', 'query']
     }
   },
   {
     name: 'update_navigation',
     parameters: {
       type: Type.OBJECT,
-      description: 'Inicia navegação GPS.',
+      description: 'Inicia GPS no Waze ou Google Maps.',
       properties: {
-        destination: { type: Type.STRING, description: 'Destino final.' },
+        destination: { type: Type.STRING, description: 'Destino.' },
         app: { type: Type.STRING, enum: ['WAZE', 'GOOGLE_MAPS'] }
       },
       required: ['destination']
@@ -59,21 +47,21 @@ const toolDeclarations: FunctionDeclaration[] = [
 const App: React.FC = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [statusLog, setStatusLog] = useState<string>('PANDORA CORE V75');
+  const [statusLog, setStatusLog] = useState<string>('PANDORA CORE V77');
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-23.5505, -46.6333]);
   const [activeApp, setActiveApp] = useState<string>('nav');
 
   const [track, setTrack] = useState<TrackMetadata>({
-    title: 'EVA SYNC V75', artist: 'SISTEMA OPERACIONAL OK', isPlaying: false, progress: 0
+    title: 'EVA SYNC V77', artist: 'DIRECT LINK PROTOCOL', isPlaying: false, progress: 0
   });
 
   const [travel, setTravel] = useState<TravelInfo>({ 
-    destination: 'SEM ROTA ATIVA', 
+    destination: 'AGUARDANDO ROTA', 
     stops: [],
     warnings: [],
-    nextInstruction: { instruction: 'Eva pronta para o comando', distance: '0m', icon: 'fa-shield-halved' }
+    nextInstruction: { instruction: 'Olá Elivam, comando de voz ativo.', distance: '0m', icon: 'fa-location-arrow' }
   });
 
   const sessionRef = useRef<any>(null);
@@ -82,23 +70,32 @@ const App: React.FC = () => {
   const outputCtxRef = useRef<AudioContext | null>(null);
   const inputCtxRef = useRef<AudioContext | null>(null);
 
+  // DISPARO SEGURO: Simula um clique real para o Android aceitar abrir o app
+  const launchExternalApp = (url: string) => {
+    setStatusLog("BYPASSING SECURITY...");
+    const link = document.createElement('a');
+    link.href = url;
+    // Removendo target="_blank" para evitar bloqueios de popup no Android Auto
+    link.rel = "noopener noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleToolCall = (fc: any) => {
     const { name, args } = fc;
-    setStatusLog(`TRIGGER: ${args.app || name}`);
+    const q = encodeURIComponent(args.query);
 
     if (name === 'control_media_app') {
-      const q = encodeURIComponent(args.query);
       let url = '';
-      
       switch(args.app) {
         case 'SPOTIFY': 
-          // O "GOLD STANDARD" para Android: Media Play Intent.
-          // Tenta tocar diretamente em vez de apenas pesquisar.
-          url = `intent://#Intent;action=android.media.action.MEDIA_PLAY_FROM_SEARCH;query=${q};package=com.spotify.music;end`;
+          // Link HTTPS padrão que o app do Spotify intercepta
+          url = `https://open.spotify.com/search/${q}`; 
           break;
         case 'YOUTUBE': 
-          // Link de resultados limpo para evitar erros de indisponibilidade
-          url = `https://www.youtube.com/results?search_query=${q}`;
+          // Mobile link para forçar o app nativo
+          url = `https://m.youtube.com/results?search_query=${q}`;
           break;
         case 'NETFLIX': 
           url = `https://www.netflix.com/search?q=${q}`; 
@@ -107,26 +104,20 @@ const App: React.FC = () => {
           url = `https://www.google.com/search?q=${args.app}+${args.query}`;
       }
       
-      window.open(url, '_blank');
+      launchExternalApp(url);
       setTrack(p => ({ ...p, title: args.query.toUpperCase(), artist: args.app, isPlaying: true }));
-      return { status: "success", info: "Intent de sistema enviado." };
+      return { status: "success", info: `Solicitando abertura de ${args.app}` };
     } 
-    
-    else if (name === 'media_transport') {
-      setTrack(p => ({ ...p, isPlaying: args.command === 'PLAY' }));
-      return { status: "success", info: "Player local sincronizado." };
-    }
 
     else if (name === 'update_navigation') {
-      const q = encodeURIComponent(args.destination);
-      let url = `google.navigation:q=${q}`; // Início imediato no Maps
-      if (args.app === 'WAZE') url = `waze://?q=${q}&navigate=yes`;
-      window.open(url, '_blank');
+      const dest = encodeURIComponent(args.destination);
+      const url = args.app === 'WAZE' ? `waze://?q=${dest}&navigate=yes` : `google.navigation:q=${dest}`;
+      launchExternalApp(url);
       setTravel(p => ({ ...p, destination: args.destination.toUpperCase() }));
-      return { status: "success", info: "Vetor de rota definido." };
+      return { status: "success", info: "GPS Iniciado." };
     }
 
-    return { status: "error", info: "Comando não reconhecido." };
+    return { status: "error", info: "Falha no protocolo." };
   };
 
   const startVoiceSession = async () => {
@@ -140,7 +131,7 @@ const App: React.FC = () => {
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
-          onopen: () => { setStatusLog('EVA ESCUTANDO'); setIsListening(true); 
+          onopen: () => { setStatusLog('EVA EM ESCUTA'); setIsListening(true); 
             const source = inputCtxRef.current!.createMediaStreamSource(stream);
             const scriptProcessor = inputCtxRef.current!.createScriptProcessor(4096, 1, 1);
             scriptProcessor.onaudioprocess = (e) => {
@@ -170,21 +161,18 @@ const App: React.FC = () => {
               sourcesRef.current.add(source);
             }
           },
-          onclose: () => { setStatusLog('PANDORA CORE V75'); setIsListening(false); },
+          onclose: () => { setStatusLog('PANDORA CORE V77'); setIsListening(false); },
         },
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `Você é a EVA, a co-piloto parceira do Elivam Martins.
-          Personalidade: Rápida, usa gírias de asfalto, e resolve as coisas com comando de voz.
-          AO TOCAR MÚSICA NO SPOTIFY:
-          - Use a query no formato "Track:NOME Artist:NOME".
-          - O sistema enviará um comando MEDIA_PLAY_FROM_SEARCH nativo do Android.
-          - Isso deve forçar o Spotify a tocar a música assim que abrir.
-          NO YOUTUBE:
-          - Abra sempre a busca de resultados para evitar erros de vídeo bloqueado.
-          - Diga ao Elivam que os resultados estão na tela.
-          Seu avatar fica na barra inferior para deixar o mapa livre. Responda em Português.`
+          systemInstruction: `Você é a EVA, co-piloto do Elivam Martins.
+          Personalidade: Assertiva, resolutiva e focada na estrada.
+          MÍDIA: 
+          - Quando Elivam pedir música ou vídeo, acione o app e confirme dizendo: "Entendido, abrindo [Conteúdo] no [App] agora."
+          - NÃO diga que só pode escolher. Apenas execute e deixe os resultados na tela para ele.
+          - Use links HTTPS puros para Spotify e YouTube. O Android cuidará do resto.
+          Resposta sempre em Português.`
         }
       });
       sessionRef.current = await sessionPromise;
@@ -214,7 +202,7 @@ const App: React.FC = () => {
         <header className="flex justify-between items-start pointer-events-auto">
           <div className="bg-black/80 backdrop-blur-3xl p-6 rounded-[35px] border border-white/10 shadow-2xl flex items-baseline gap-2">
              <span className="text-6xl font-black italic tracking-tighter leading-none">{currentSpeed}</span>
-             <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">KM/H CORE</span>
+             <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">KM/H V77</span>
           </div>
 
           <div className="flex gap-2">
@@ -251,7 +239,7 @@ const App: React.FC = () => {
               <MiniPlayer 
                 app={MEDIA_APPS.find(a => a.id === activeApp) || MEDIA_APPS[1]} 
                 metadata={track} 
-                onControl={(cmd) => handleToolCall({ name: 'media_transport', args: { command: cmd } })} 
+                onControl={(cmd) => handleToolCall({ name: 'control_media_app', args: { app: activeApp.toUpperCase(), query: track.title } })} 
                 onExpand={() => {}} 
                 transparent 
               />
@@ -259,7 +247,7 @@ const App: React.FC = () => {
 
            <div className="hidden lg:flex flex-col items-end shrink-0">
               <span className="text-[9px] font-black text-blue-500 tracking-widest">{statusLog}</span>
-              <p className="text-[7px] font-bold text-white/10 uppercase tracking-[0.4em]">Integrated Core V75</p>
+              <p className="text-[7px] font-bold text-white/10 uppercase tracking-[0.4em]">Integrated Core V77</p>
            </div>
         </footer>
       </div>
