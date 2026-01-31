@@ -64,11 +64,11 @@ const App: React.FC = () => {
       const apiKey = process.env.API_KEY;
       
       if (!apiKey || apiKey === 'undefined' || apiKey === '') {
-        setApiErrorMessage("ERRO: API_KEY não detectada. Verifique as variáveis de ambiente no Vercel e faça um REDEPLOY.");
+        setApiErrorMessage("ERRO CRÍTICO: Chave não encontrada. No Vercel, certifique-se de que a variável 'API_KEY' está salva e você clicou em 'Redeploy'.");
         return;
       }
 
-      setStatusLog('CONECTANDO...');
+      setStatusLog('SINCRONIZANDO...');
       await cleanupAudioResources();
       
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -120,7 +120,7 @@ const App: React.FC = () => {
             }
           },
           onerror: (e: any) => { 
-            setApiErrorMessage(`ERRO API: ${e.message}`);
+            setApiErrorMessage(`ERRO DE REDE: ${e.message}`);
             cleanupAudioResources();
           },
           onclose: () => { 
@@ -135,7 +135,7 @@ const App: React.FC = () => {
       });
       sessionRef.current = await sessionPromise;
     } catch (err: any) { 
-      setApiErrorMessage(`ERRO HARDWARE: ${err.message}`);
+      setApiErrorMessage(`ERRO DE HARDWARE: ${err.message}`);
       cleanupAudioResources();
     }
   };
@@ -165,7 +165,7 @@ const App: React.FC = () => {
       <header className="h-[60px] bg-black/80 backdrop-blur-lg border-b border-white/5 flex items-center px-6 gap-4 z-[50] shrink-0">
         <div className="flex items-center gap-3 pr-4 border-r border-white/10 shrink-0">
            <div className={`w-2 h-2 rounded-full ${gpsLocked ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-red-600 animate-pulse'}`}></div>
-           <span className="text-[10px] font-black uppercase tracking-widest text-white/50">PANDORA V67</span>
+           <span className="text-[10px] font-black uppercase tracking-widest text-white/50">PANDORA CORE V67</span>
         </div>
         <div className="flex gap-2 overflow-x-auto no-scrollbar flex-1 items-center">
           {MEDIA_APPS.map(app => (
@@ -182,25 +182,26 @@ const App: React.FC = () => {
         
         {/* Velocímetro */}
         <div className="w-full flex justify-start pointer-events-auto">
-          <div className="bg-black/90 backdrop-blur-2xl p-6 rounded-[40px] border border-white/10 shadow-2xl flex flex-col items-center">
+          <div className="bg-black/90 backdrop-blur-2xl p-6 rounded-[40px] border border-white/10 shadow-2xl flex flex-col items-center min-w-[120px]">
               <span className="text-[10px] font-black text-blue-500 uppercase mb-1">KM/H</span>
               <span className="text-6xl font-black leading-none italic tracking-tighter">{currentSpeed}</span>
           </div>
         </div>
 
-        {/* EVA Avatar - O centro de comando */}
+        {/* EVA Avatar - O centro de comando com movimento */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-auto">
             <div 
               onClick={() => isListening ? cleanupAudioResources() : startVoiceSession()}
-              className={`relative w-56 h-56 lg:w-72 lg:h-72 rounded-full flex items-center justify-center transition-all duration-500 cursor-pointer ${isListening ? 'scale-110' : 'scale-100 hover:scale-105'}`}
+              className={`relative w-56 h-56 lg:w-72 lg:h-72 rounded-full flex items-center justify-center transition-all duration-500 cursor-pointer ${isListening ? 'scale-110' : 'scale-100'}`}
             >
                <div className={`absolute inset-0 rounded-full border-4 border-blue-500/20 animate-ping-slow ${isListening || isSpeaking ? 'opacity-100' : 'opacity-0'}`}></div>
+               <div className={`absolute -inset-4 rounded-full bg-blue-500/10 blur-3xl transition-opacity duration-500 ${isListening || isSpeaking ? 'opacity-100' : 'opacity-0'}`}></div>
                <div className="w-full h-full rounded-full border-2 border-white/10 overflow-hidden shadow-[0_0_80px_rgba(37,99,235,0.2)] bg-black relative">
                   <Avatar isListening={isListening} isSpeaking={isSpeaking} videoUrl={veoVideoUrl} onAnimateClick={() => {}} />
                   {isListening && (
-                    <div className="absolute bottom-8 left-0 right-0 flex justify-center gap-1 h-6 items-end">
+                    <div className="absolute bottom-10 left-0 right-0 flex justify-center gap-1 h-8 items-end">
                        {[1,2,3,4,5].map(i => (
-                         <div key={i} className="w-1 bg-white rounded-full animate-wave" style={{ animationDelay: `${i*0.1}s` }}></div>
+                         <div key={i} className="w-1.5 bg-white rounded-full animate-wave" style={{ animationDelay: `${i*0.1}s` }}></div>
                        ))}
                     </div>
                   )}
@@ -220,7 +221,7 @@ const App: React.FC = () => {
       </main>
 
       {/* Player Footer */}
-      <footer className="h-[100px] bg-black border-t border-white/5 px-8 flex items-center justify-between z-[50] shrink-0">
+      <footer className="h-[100px] bg-black border-t border-white/5 px-8 flex items-center justify-between z-[50] shrink-0 pointer-events-auto">
          <div className="flex-1 max-w-[300px]">
             <MiniPlayer app={MEDIA_APPS[1]} metadata={track} onControl={() => {}} onExpand={() => setActiveApp('spotify')} transparent />
          </div>
@@ -234,15 +235,17 @@ const App: React.FC = () => {
          </div>
       </footer>
 
-      {/* Error Overlay */}
+      {/* Overlay de Erro de Build/Config */}
       {apiErrorMessage && (
-        <div className="fixed inset-0 z-[1000] bg-black/90 backdrop-blur-xl flex items-center justify-center p-8 text-center animate-fade-in">
+        <div className="fixed inset-0 z-[1000] bg-black/90 backdrop-blur-xl flex items-center justify-center p-8 text-center animate-fade-in pointer-events-auto">
           <div className="max-w-md flex flex-col gap-6">
-             <i className="fas fa-exclamation-triangle text-5xl text-red-600"></i>
-             <h2 className="text-2xl font-black uppercase italic">Falha no Sistema</h2>
-             <p className="text-xs font-bold text-white/60 uppercase italic tracking-widest leading-relaxed">{apiErrorMessage}</p>
-             <button onClick={() => window.location.reload()} className="h-16 bg-white text-black rounded-2xl font-black uppercase text-xs active:scale-95 transition-all">Recarregar Core</button>
-             <button onClick={() => setApiErrorMessage(null)} className="text-[10px] font-black text-white/30 uppercase underline">Fechar e Ignorar</button>
+             <i className="fas fa-microchip text-5xl text-red-600"></i>
+             <h2 className="text-2xl font-black uppercase italic">Falha de Injeção</h2>
+             <p className="text-xs font-bold text-white/60 uppercase italic tracking-widest leading-relaxed">
+               {apiErrorMessage}
+             </p>
+             <button onClick={() => window.location.reload()} className="h-16 bg-white text-black rounded-2xl font-black uppercase text-xs active:scale-95 transition-all">Sincronizar Novamente</button>
+             <button onClick={() => setApiErrorMessage(null)} className="text-[10px] font-black text-white/30 uppercase underline">Ignorar Erro</button>
           </div>
         </div>
       )}
