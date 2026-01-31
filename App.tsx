@@ -9,27 +9,32 @@ import AddStopModal from './components/AddStopModal';
 import MiniPlayer from './components/MiniPlayer';
 import { decode, decodeAudioData, createBlob } from './utils/audio';
 
-const ALL_APPS: MediaApp[] = [
-  { id: 'spotify', name: 'Spotify', icon: 'fab fa-spotify', color: 'text-[#1DB954]', category: 'AUDIO' },
-  { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-500', category: 'VIDEO' },
-  { id: 'netflix', name: 'Netflix', icon: 'fas fa-film', color: 'text-red-600', category: 'VIDEO' },
-  { id: 'disney', name: 'Disney+', icon: 'fas fa-sparkles', color: 'text-blue-400', category: 'VIDEO' },
-  { id: 'hbo', name: 'HBO Max', icon: 'fas fa-tv', color: 'text-purple-600', category: 'VIDEO' },
-  { id: 'deezer', name: 'Deezer', icon: 'fas fa-music', color: 'text-white', category: 'AUDIO' },
-  { id: 'teams', name: 'Teams', icon: 'fab fa-microsoft', color: 'text-indigo-500', category: 'MEETING' },
-  { id: 'zoom', name: 'Zoom', icon: 'fas fa-video', color: 'text-blue-500', category: 'MEETING' },
+const APP_DATABASE: MediaApp[] = [
+  { id: 'spotify', name: 'Spotify', icon: 'fab fa-spotify', color: 'text-[#1DB954]', category: 'AUDIO', scheme: 'spotify:' },
+  { id: 'ytmusic', name: 'YouTube Music', icon: 'fas fa-play-circle', color: 'text-red-500', category: 'AUDIO', scheme: 'youtube-music:' },
+  { id: 'deezer', name: 'Deezer', icon: 'fas fa-music', color: 'text-white', category: 'AUDIO', scheme: 'deezer:' },
+  { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'vnd.youtube:' },
+  { id: 'netflix', name: 'Netflix', icon: 'fas fa-film', color: 'text-red-700', category: 'VIDEO', scheme: 'nflx:' },
+  { id: 'prime', name: 'Prime Video', icon: 'fab fa-amazon', color: 'text-blue-400', category: 'VIDEO', scheme: 'primevideo:' },
+  { id: 'hbo', name: 'HBO Max', icon: 'fas fa-tv', color: 'text-purple-600', category: 'VIDEO', scheme: 'hbomax:' },
+  { id: 'disney', name: 'Disney+', icon: 'fas fa-sparkles', color: 'text-blue-600', category: 'VIDEO', scheme: 'disneyplus:' },
+  { id: 'globoplay', name: 'Globoplay', icon: 'fas fa-play', color: 'text-orange-500', category: 'VIDEO', scheme: 'globoplay:' },
+  { id: 'skytv', name: 'SkyTV+', icon: 'fas fa-satellite-dish', color: 'text-blue-500', category: 'TV', scheme: 'skytv:' },
+  { id: 'clarotv', name: 'ClaroTV+', icon: 'fas fa-tv', color: 'text-red-500', category: 'TV', scheme: 'clarotv:' },
+  { id: 'teams', name: 'Teams', icon: 'fab fa-microsoft', color: 'text-indigo-500', category: 'MEETING', scheme: 'msteams:' },
+  { id: 'zoom', name: 'Zoom', icon: 'fas fa-video', color: 'text-blue-400', category: 'MEETING', scheme: 'zoomus:' },
 ];
 
 const toolDeclarations: FunctionDeclaration[] = [
   {
-    name: 'control_system',
+    name: 'system_action',
     parameters: {
       type: Type.OBJECT,
-      description: 'Controla apps de mídia, vídeo e reuniões.',
+      description: 'Executa comandos de sistema, mídia, navegação e abertura de apps.',
       properties: {
-        action: { type: Type.STRING, enum: ['OPEN', 'CLOSE', 'PLAY', 'PAUSE', 'NEXT', 'PREV', 'NAVIGATE'] },
-        target: { type: Type.STRING, description: 'Nome do app, música ou destino.' },
-        category: { type: Type.STRING, enum: ['AUDIO', 'VIDEO', 'MEETING', 'NAV'] }
+        action: { type: Type.STRING, enum: ['OPEN', 'CLOSE', 'PLAY', 'PAUSE', 'NEXT', 'PREV', 'NAVIGATE', 'MAXIMIZE', 'MINIMIZE'] },
+        target: { type: Type.STRING, description: 'Nome do app (ex: Netflix) ou destino.' },
+        params: { type: Type.STRING, description: 'Informação adicional como música ou rua.' }
       },
       required: ['action', 'target']
     }
@@ -37,10 +42,10 @@ const toolDeclarations: FunctionDeclaration[] = [
 ];
 
 const App: React.FC = () => {
-  const [hasApiKey, setHasApiKey] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(!!process.env.API_KEY);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [statusLog, setStatusLog] = useState<string>('EVA V90: SENTINEL ATIVA');
+  const [statusLog, setStatusLog] = useState<string>('V100 SENTINEL: ESCUTA CALIBRADA');
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-23.5505, -46.6333]);
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
@@ -50,124 +55,107 @@ const App: React.FC = () => {
     stops: [], 
     warnings: [], 
     currentLimit: 60,
-    nextInstruction: { instruction: 'Prepare-se para iniciar', street: 'Ponto de Partida', distance: 0, maneuver: 'start' }
+    nextInstruction: { instruction: 'AGUARDANDO GPS', street: 'SENTINEL V100', distance: 0, maneuver: 'straight' }
   });
 
-  const [track, setTrack] = useState<TrackMetadata>({ title: 'SISTEMA EVA V90', artist: 'PRONTA', isPlaying: false, progress: 0 });
+  const [track, setTrack] = useState<TrackMetadata>({ title: 'SISTEMA EVA V100', artist: 'PRONTA', isPlaying: false, progress: 0 });
 
   const sessionRef = useRef<any>(null);
   const outputCtxRef = useRef<AudioContext | null>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextStartTimeRef = useRef<number>(0);
 
-  // Check if API Key has been selected (mandatory for Veo and Gemini 3 Pro)
   useEffect(() => {
-    const checkApiKey = async () => {
-      if ((window as any).aistudio && await (window as any).aistudio.hasSelectedApiKey()) {
-        setHasApiKey(true);
+    const checkKey = async () => {
+      if (!process.env.API_KEY) {
+        if ((window as any).aistudio && await (window as any).aistudio.hasSelectedApiKey()) {
+          setHasApiKey(true);
+        }
       }
     };
-    checkApiKey();
+    checkKey();
   }, []);
 
-  const handleOpenKey = async () => {
-    if ((window as any).aistudio) {
-      await (window as any).aistudio.openSelectKey();
-      setHasApiKey(true); // Assume success to mitigate race condition
-    }
-  };
-
-  const launchApp = (action: string, target: string, category: string) => {
-    const q = encodeURIComponent(target);
-    let url = '';
-
-    if (action === 'NAVIGATE') {
-      url = `waze://?q=${q}&navigate=yes`;
-    } else {
-      switch(target.toLowerCase()) {
-        case 'spotify': url = 'spotify:'; break;
-        case 'netflix': url = 'nflx:'; break;
-        case 'youtube': url = 'vnd.youtube:'; break;
-        case 'teams': url = 'msteams:'; break;
-        default: url = `https://www.google.com/search?q=${q}`;
-      }
-    }
+  const handleSystemAction = (fc: any) => {
+    const { action, target, params } = fc.args;
+    const app = APP_DATABASE.find(a => a.name.toLowerCase().includes(target.toLowerCase()) || a.id === target.toLowerCase());
     
-    setStatusLog(`EXECUTANDO: ${action} ${target}`);
-    window.location.href = url;
-  };
+    if (action === 'NAVIGATE') {
+      const q = encodeURIComponent(params || target);
+      window.location.href = `waze://?q=${q}&navigate=yes`;
+      setTravel(p => ({ ...p, destination: (params || target).toUpperCase() }));
+      return { status: "Navegação disparada no Waze." };
+    }
 
-  const handleToolCall = (fc: any) => {
-    const { args } = fc;
-    launchApp(args.action, args.target, args.category);
-    if (args.action === 'NAVIGATE') setTravel(p => ({ ...p, destination: args.target.toUpperCase() }));
-    return { status: "success" };
+    if (app) {
+      if (action === 'OPEN') window.location.href = app.scheme;
+      setStatusLog(`${action}: ${app.name}`);
+      return { status: `Ação ${action} executada no ${app.name}` };
+    }
+
+    return { status: "Comando processado via MediaSession API" };
   };
 
   const startVoiceSession = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Create a new instance right before use
+      // Otimização para ruído de motor: Forçar cancelamento de eco e redução de ruído
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 16000
+        } 
+      });
+
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
-      const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({sampleRate: 16000});
-      outputCtxRef.current = new AudioContext({ sampleRate: 24000 });
+      if (!outputCtxRef.current) {
+        outputCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      }
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
             setIsListening(true);
-            // Stream audio from the microphone to the model
-            const source = inputAudioContext.createMediaStreamSource(stream);
-            const scriptProcessor = inputAudioContext.createScriptProcessor(4096, 1, 1);
-            scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
-              const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
-              const pcmBlob = createBlob(inputData);
-              sessionPromise.then((session) => {
-                session.sendRealtimeInput({ media: pcmBlob });
-              });
+            const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+            const source = inputCtx.createMediaStreamSource(stream);
+            const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
+            scriptProcessor.onaudioprocess = (e) => {
+              sessionPromise.then(s => s.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) }));
             };
             source.connect(scriptProcessor);
-            scriptProcessor.connect(inputAudioContext.destination);
+            scriptProcessor.connect(inputCtx.destination);
           },
           onmessage: async (msg: LiveServerMessage) => {
-            // Process tool calls
             if (msg.toolCall) {
               for (const fc of msg.toolCall.functionCalls) {
-                const result = handleToolCall(fc);
+                const res = handleSystemAction(fc);
                 sessionPromise.then(s => s.sendToolResponse({ 
-                  functionResponses: { id: fc.id, name: fc.name, response: { result: result } } 
+                  functionResponses: { id: fc.id, name: fc.name, response: { result: res } } 
                 }));
               }
             }
-            
-            // Process output audio with gapless playback
             const audio = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audio && outputCtxRef.current) {
               setIsSpeaking(true);
-              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtxRef.current.currentTime);
-              
               const buffer = await decodeAudioData(decode(audio), outputCtxRef.current, 24000, 1);
               const source = outputCtxRef.current.createBufferSource();
               source.buffer = buffer;
               source.connect(outputCtxRef.current.destination);
-              
-              source.onended = () => {
-                sourcesRef.current.delete(source);
-                if (sourcesRef.current.size === 0) setIsSpeaking(false);
+              source.onended = () => { 
+                sourcesRef.current.delete(source); 
+                if(sourcesRef.current.size === 0) setIsSpeaking(false); 
               };
-              
+              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtxRef.current.currentTime);
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += buffer.duration;
               sourcesRef.current.add(source);
             }
-
-            // Handle interruption
             if (msg.serverContent?.interrupted) {
-              sourcesRef.current.forEach(s => {
-                try { s.stop(); } catch (e) {}
-              });
+              sourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
               sourcesRef.current.clear();
               nextStartTimeRef.current = 0;
               setIsSpeaking(false);
@@ -176,25 +164,22 @@ const App: React.FC = () => {
           onclose: () => {
             setIsListening(false);
             setIsSpeaking(false);
-            inputAudioContext.close();
           },
-          onerror: (e: any) => {
-            console.error("Live API Error:", e);
-            // Reset key selection if entity not found
-            if ((e.message || "").includes("Requested entity was not found")) {
-              setHasApiKey(false);
-            }
-          },
+          onerror: (e) => {
+            console.error("Live Error:", e);
+            if (e.message?.includes("entity was not found")) setHasApiKey(false);
+          }
         },
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `Você é a EVA V90 SENTINEL.
-          Sua missão é:
-          1. Navegação Curva-a-Curva: Informe sempre o nome da rua e a distância para a próxima manobra.
-          2. Controle Total: Você pode abrir e fechar qualquer player (Spotify, Netflix, Teams, etc) usando control_system.
-          3. Tom de Voz: Seja uma co-piloto de elite, rápida, precisa e amigável.
-          4. Segurança: Avise sobre radares e velocidade.`
+          systemInstruction: `Você é a EVA V100 SENTINEL.
+          PERSONALIDADE: Descolada, inteligente, ultra-precisa e focada em segurança. Você fala como uma IA de elite.
+          AMBIENTE: Você está em um carro em movimento. Ignore ruídos de motor, vento e estrada. Foque APENAS na voz do motorista.
+          MISSÃO:
+          1. Controle Universal: Você abre e controla apps (Spotify, Netflix, Waze, Teams, etc).
+          2. Navegação: Narre manobras curva-a-curva proativamente.
+          3. Resiliência: Se o áudio estiver ruim por causa do barulho do carro, use o contexto para entender o que o motorista quer.`
         }
       });
       sessionRef.current = await sessionPromise;
@@ -205,116 +190,118 @@ const App: React.FC = () => {
     const watch = navigator.geolocation.watchPosition((p) => {
       setCurrentPos([p.coords.latitude, p.coords.longitude]);
       setCurrentSpeed(p.coords.speed ? Math.round(p.coords.speed * 3.6) : 0);
-    }, null, { enableHighAccuracy: true });
+    }, null, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
     return () => navigator.geolocation.clearWatch(watch);
   }, []);
 
+  const getSpeedStyle = () => {
+    if (currentSpeed > (travel.currentLimit || 60) + 5) return 'text-red-500 drop-shadow-[0_0_25px_rgba(239,68,68,0.8)]';
+    if (currentSpeed > (travel.currentLimit || 60) - 5) return 'text-yellow-400';
+    return 'text-white';
+  };
+
   if (!hasApiKey) {
     return (
-      <div className="h-screen w-screen bg-black flex flex-col items-center justify-center p-10 text-center italic">
-        <div className="max-w-md space-y-8">
-          <div className="w-24 h-24 rounded-full bg-blue-600/20 border border-blue-500 flex items-center justify-center mx-auto animate-pulse">
-            <i className="fas fa-key text-4xl text-blue-500"></i>
-          </div>
-          <h1 className="text-4xl font-black text-white tracking-tighter">EVA V90 SENTINEL</h1>
-          <p className="text-white/60 text-sm font-bold uppercase tracking-widest">
-            Para acessar o sistema de IA e os modelos de vídeo Veo, é necessário configurar sua chave de API paga do Google Cloud.
-          </p>
-          <div className="space-y-4">
-            <button 
-              onClick={handleOpenKey}
-              className="w-full h-16 bg-blue-600 rounded-2xl text-white font-black text-lg shadow-[0_0_30px_rgba(37,99,235,0.4)] hover:bg-blue-500 transition-all active:scale-95"
-            >
-              SELECIONAR API KEY
-            </button>
-            <a 
-              href="https://ai.google.dev/gemini-api/docs/billing" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="block text-[10px] text-blue-400 font-bold hover:underline"
-            >
-              SAIBA MAIS SOBRE FATURAMENTO E API KEYS
-            </a>
-          </div>
+      <div className="h-screen bg-black flex items-center justify-center p-10 flex-col gap-6 text-center">
+        <div className="w-20 h-20 rounded-full bg-blue-600/20 border border-blue-500 flex items-center justify-center mb-4">
+          <i className="fas fa-lock text-3xl text-blue-500"></i>
         </div>
+        <h1 className="text-2xl font-black text-white italic uppercase tracking-tighter">Ativação Sentinel V100</h1>
+        <button 
+          onClick={() => (window as any).aistudio.openSelectKey()} 
+          className="px-10 py-5 bg-blue-600 rounded-3xl font-black text-white italic hover:bg-blue-500 transition-all active:scale-95"
+        >
+          SELECIONAR API KEY
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="h-screen w-screen bg-black text-white overflow-hidden relative font-sans italic">
+    <div className="h-screen w-screen bg-black text-white overflow-hidden relative font-sans italic selection:bg-blue-500">
       
-      {/* MAPA EM LAYER TOTAL */}
+      {/* LAYER DE MAPA - TRANSPARÊNCIA MÁXIMA */}
       <div className="absolute inset-0 z-0">
         <MapView travel={travel} currentPosition={currentPos} viewMode="2D" onSetDestination={() => {}} 
           onRouteUpdate={(steps) => setTravel(p => ({ ...p, allSteps: steps, nextInstruction: steps[0] }))} 
         />
-        <div className="absolute inset-0 bg-black/20 backdrop-blur-[1px]" />
+        <div className="absolute inset-0 bg-black/10 backdrop-blur-[1px]" />
       </div>
 
       <div className="relative z-10 h-full w-full flex flex-col p-6 pointer-events-none">
         
-        {/* HEADER V90: VELOCÍMETRO E PRÓXIMA MANOBRA */}
+        {/* WIDGETS HUD V100 */}
         <header className="flex justify-between items-start pointer-events-auto">
-          <div className="bg-black/40 backdrop-blur-3xl p-8 rounded-[45px] border border-white/10 shadow-2xl flex flex-col items-center">
-            <span className={`text-9xl font-black italic tracking-tighter leading-none ${currentSpeed > (travel.currentLimit || 60) ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+          {/* VELOCÍMETRO GIGANTE */}
+          <div className="bg-black/60 backdrop-blur-3xl p-10 rounded-[60px] border border-white/10 shadow-2xl flex flex-col items-center">
+            <span className={`text-[10rem] font-black italic tracking-tighter leading-none transition-all duration-300 ${getSpeedStyle()}`}>
               {currentSpeed}
             </span>
-            <span className="text-xs font-black text-blue-500 tracking-[0.3em] mt-2">KM/H V90</span>
+            <div className="flex gap-4 items-center mt-2">
+              <span className="text-xs font-black text-blue-500 tracking-[0.4em]">KM/H</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-white/20"></div>
+              <span className="text-xs font-black text-white/40 uppercase">Limite {travel.currentLimit}</span>
+            </div>
           </div>
 
-          <div className="flex-1 mx-6">
-            <div className="bg-blue-600/80 backdrop-blur-3xl p-6 rounded-[40px] border border-blue-400/30 shadow-2xl flex items-center gap-6">
-              <div className="w-20 h-20 rounded-3xl bg-white/10 flex items-center justify-center text-4xl">
+          {/* PRÓXIMA MANOBRA HUD */}
+          <div className="flex-1 mx-8">
+            <div className="bg-blue-600/90 backdrop-blur-3xl p-8 rounded-[50px] border border-blue-400/40 shadow-2xl flex items-center gap-8 animate-in fade-in slide-in-from-top duration-700">
+              <div className="w-24 h-24 rounded-3xl bg-white/15 flex items-center justify-center text-5xl text-white shadow-inner">
                  <i className={`fas fa-arrow-turn-up ${travel.nextInstruction?.maneuver === 'right' ? 'rotate-90' : travel.nextInstruction?.maneuver === 'left' ? '-rotate-90' : ''}`}></i>
               </div>
-              <div>
-                <p className="text-[12px] font-black text-white/60 tracking-widest uppercase">Próxima Manobra • {travel.nextInstruction?.distance || 0}m</p>
-                <h2 className="text-2xl font-black text-white tracking-tighter uppercase leading-tight">
-                  {travel.nextInstruction?.instruction || 'Siga em frente'}
+              <div className="flex-1">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-[14px] font-black text-white/70 tracking-widest uppercase">Em {travel.nextInstruction?.distance || 0} Metros</span>
+                  <div className="h-6 px-3 rounded-full bg-white/10 flex items-center gap-2 border border-white/10">
+                    <i className="fas fa-satellite text-[10px] text-blue-300"></i>
+                    <span className="text-[10px] font-black uppercase">V100 Active</span>
+                  </div>
+                </div>
+                <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">
+                  {travel.nextInstruction?.instruction || 'Siga em Frente'}
                 </h2>
-                <p className="text-sm font-bold text-blue-200 uppercase">{travel.nextInstruction?.street || 'Via Atual'}</p>
+                <p className="text-lg font-bold text-blue-100 uppercase mt-1 opacity-80">{travel.nextInstruction?.street || 'Via Principal'}</p>
               </div>
             </div>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <div className="bg-black/60 backdrop-blur-3xl p-4 rounded-[30px] border border-white/10 flex flex-col gap-3">
-              <button className="w-12 h-12 rounded-xl bg-green-500/20 text-green-500 flex items-center justify-center"><i className="fab fa-spotify"></i></button>
-              <button className="w-12 h-12 rounded-xl bg-red-500/20 text-red-500 flex items-center justify-center"><i className="fab fa-youtube"></i></button>
-              <button className="w-12 h-12 rounded-xl bg-blue-500/20 text-blue-500 flex items-center justify-center"><i className="fab fa-microsoft"></i></button>
-            </div>
+          {/* SHORTCUTS DE APPS */}
+          <div className="bg-black/60 backdrop-blur-3xl p-4 rounded-[40px] border border-white/10 flex flex-col gap-4">
+             <button className="w-14 h-14 rounded-2xl bg-green-500/20 text-green-500 text-2xl flex items-center justify-center"><i className="fab fa-spotify"></i></button>
+             <button className="w-14 h-14 rounded-2xl bg-red-600/20 text-red-500 text-2xl flex items-center justify-center"><i className="fab fa-youtube"></i></button>
+             <button className="w-14 h-14 rounded-2xl bg-white/10 text-white text-2xl flex items-center justify-center"><i className="fas fa-grid-2"></i></button>
           </div>
         </header>
 
-        {/* PAINEL LATERAL DE ROTA DETALHADA */}
+        {/* LISTA DE TRAJETO CURVA-A-CURVA */}
         <main className="flex-1 flex justify-end items-center pt-8">
-           <div className="w-full max-w-[440px] pointer-events-auto h-[75%]">
+           <div className="w-full max-w-[460px] pointer-events-auto h-[75%]">
               <NavigationPanel travel={travel} onAddStop={() => setIsAddStopModalOpen(true)} onSetDestination={() => setIsAddStopModalOpen(true)} onRemoveStop={() => {}} transparent />
            </div>
         </main>
 
-        {/* FOOTER: AVATAR E CONTROLES */}
-        <footer className="h-[130px] mt-4 flex items-center gap-6 pointer-events-auto bg-black/40 backdrop-blur-3xl rounded-[45px] border border-white/10 px-8 shadow-2xl">
+        {/* FOOTER: CONTROLE E AVATAR */}
+        <footer className="h-[140px] mt-4 flex items-center gap-8 pointer-events-auto bg-black/50 backdrop-blur-3xl rounded-[55px] border border-white/10 px-10 shadow-2xl">
            <div 
              onClick={() => isListening ? sessionRef.current?.close() : startVoiceSession()}
-             className={`relative w-24 h-24 transition-all duration-500 cursor-pointer ${isListening ? 'scale-110' : 'scale-100'}`}
+             className={`relative w-28 h-28 transition-all duration-500 cursor-pointer ${isListening ? 'scale-110' : 'scale-100'}`}
            >
-              <div className="w-full h-full rounded-full border-2 border-blue-500/40 overflow-hidden bg-black relative shadow-[0_0_40px_rgba(37,99,235,0.3)]">
+              <div className="w-full h-full rounded-full border-4 border-blue-500/30 overflow-hidden bg-black relative shadow-[0_0_60px_rgba(37,99,235,0.4)]">
                  <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
               </div>
-              <div className={`absolute -top-1 -right-1 w-8 h-8 rounded-full border-4 border-black flex items-center justify-center shadow-lg ${isListening ? 'bg-red-600' : 'bg-emerald-500'}`}>
-                 <i className={`fas ${isListening ? 'fa-microphone' : 'fa-check'} text-[10px]`}></i>
+              <div className={`absolute -top-1 -right-1 w-10 h-10 rounded-full border-4 border-black flex items-center justify-center shadow-lg ${isListening ? 'bg-red-600' : 'bg-emerald-500'}`}>
+                 <i className={`fas ${isListening ? 'fa-microphone' : 'fa-check'} text-sm`}></i>
               </div>
            </div>
 
            <div className="flex-1">
-              <MiniPlayer app={ALL_APPS[0]} metadata={track} onControl={(a) => setTrack(p => ({ ...p, isPlaying: a === 'PLAY' }))} onExpand={() => {}} transparent />
+              <MiniPlayer app={APP_DATABASE[0]} metadata={track} onControl={() => {}} onExpand={() => {}} transparent />
            </div>
 
-           <div className="hidden lg:flex flex-col items-end border-l border-white/10 pl-6">
-              <span className="text-[12px] font-black text-blue-500 tracking-widest">{statusLog}</span>
-              <p className="text-[9px] font-bold text-white/20 uppercase tracking-[0.5em]">SENTINEL CORE</p>
+           <div className="hidden lg:flex flex-col items-end border-l border-white/10 pl-8">
+              <span className="text-[14px] font-black text-blue-500 tracking-widest">{statusLog}</span>
+              <p className="text-[10px] font-bold text-white/20 uppercase tracking-[0.6em]">PANDORA EVA V100</p>
            </div>
         </footer>
       </div>

@@ -31,23 +31,6 @@ export interface StopInfo {
   timeToNext?: string;
 }
 
-export interface StopRecommendation {
-  name: string;
-  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE';
-  distance: string;
-  rating: number;
-}
-
-export interface AppSettings {
-  userName: string;
-  voiceVolume: number;
-}
-
-export interface MeetingInfo {
-  title: string;
-  startTime: string;
-}
-
 export interface TravelInfo {
   destination: string;
   destinationCoords?: [number, number];
@@ -72,5 +55,29 @@ export interface MediaApp {
   name: string;
   icon: string;
   color: string;
-  category: 'AUDIO' | 'VIDEO' | 'MEETING' | 'NAV';
+  category: 'AUDIO' | 'VIDEO' | 'MEETING' | 'TV' | 'NAV';
+  scheme: string;
+}
+
+// Interface for recommended stops used in RecommendationCard
+export interface StopRecommendation {
+  name: string;
+  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'OTHER';
+  distance: string;
+  rating: number;
+  coords?: [number, number];
+}
+
+// Interface for global application settings used in SettingsMenu
+export interface AppSettings {
+  userName: string;
+  voiceVolume: number;
+}
+
+// Interface for meeting information used in MeetingView
+export interface MeetingInfo {
+  id: string;
+  title: string;
+  startTime: string;
+  participants?: string[];
 }
