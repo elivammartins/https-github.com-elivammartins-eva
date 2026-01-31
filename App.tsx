@@ -60,7 +60,7 @@ const App: React.FC = () => {
   const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
-    // Detecta se estamos no AI Studio (Preview) ou Vercel (Standalone)
+    // Detecta se estamos rodando fora do sandbox do Google (Vercel ou Localhost)
     setIsStandalone(!(window as any).aistudio);
   }, []);
 
@@ -92,6 +92,7 @@ const App: React.FC = () => {
       if (!hasKey) {
         setStatusLog('CHAVE EXTERNA');
         await aistudio.openSelectKey();
+        // Otimismo: Após abrir o diálogo, tentamos conectar
         startVoiceSession();
         return;
       }
@@ -102,17 +103,20 @@ const App: React.FC = () => {
   const startVoiceSession = async () => {
     setApiErrorMessage(null);
     try {
+      // Verificação rigorosa do valor injetado
       const apiKey = process.env.API_KEY;
       
-      if (!apiKey || apiKey === 'undefined' || apiKey === '') {
+      if (!apiKey || apiKey === 'undefined' || apiKey === '' || apiKey.includes("process.env")) {
         setStatusLog('SEM CHAVE');
-        setApiErrorMessage(isStandalone 
-          ? "ERRO VERCEL: A variável de ambiente API_KEY não foi encontrada no painel da Vercel. Adicione-a e faça um novo deploy." 
-          : "ERRO GOOGLE: Chave não selecionada no AI Studio. Clique em 'Trocar Projeto'.");
+        if (isStandalone) {
+          setApiErrorMessage("⚠️ FALHA VERCEL: API_KEY não definida. No painel da Vercel, vá em Settings > Environment Variables, adicione 'API_KEY' com sua chave do AI Studio e faça um NOVO DEPLOY.");
+        } else {
+          setApiErrorMessage("⚠️ FALHA GOOGLE: Chave não selecionada no AI Studio. Clique em 'Trocar Projeto' e escolha um projeto com faturamento ativo.");
+        }
         return;
       }
 
-      setStatusLog('HANDSHAKE...');
+      setStatusLog('SINCRONIZANDO...');
       await cleanupAudioResources();
       await new Promise(r => setTimeout(r, 400));
 
@@ -123,12 +127,13 @@ const App: React.FC = () => {
       outputCtxRef.current = new AudioContextClass({ sampleRate: 24000 });
       inputCtxRef.current = new AudioContextClass({ sampleRate: 16000 });
 
+      // Nova instância com a chave atualizada
       const ai = new GoogleGenAI({ apiKey });
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
-            setStatusLog('EVA: ESCUTANDO');
+            setStatusLog('EVA: ATIVA');
             setIsListening(true);
             setApiErrorMessage(null);
             const source = inputCtxRef.current!.createMediaStreamSource(stream);
@@ -166,9 +171,15 @@ const App: React.FC = () => {
             }
           },
           onerror: (e: any) => { 
-            const errMsg = e.message || "Falha na conexão com Gemini Live API";
-            setApiErrorMessage(errMsg);
-            setStatusLog('ERRO API');
+            console.error("Gemini Live Error:", e);
+            const errMsg = e.message || "Erro de conexão com a API Gemini";
+            setApiErrorMessage(`ERRO API: ${errMsg}`);
+            setStatusLog('ERRO REDE');
+            
+            // Caso especial de entidade não encontrada (chave inválida ou projeto errado)
+            if (errMsg.toLowerCase().includes("not found") || errMsg.includes("404")) {
+              if (!isStandalone) (window as any).aistudio?.openSelectKey();
+            }
             cleanupAudioResources();
           },
           onclose: () => { 
@@ -179,13 +190,13 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ googleMaps: {} }],
-          systemInstruction: 'Você é a EVA. Assistente Pandora. Responda em PT-BR de forma curta e natural. Você auxilia o motorista.'
+          systemInstruction: 'Você é a EVA (Electronic Vehicle Assistant). Responda em Português do Brasil de forma concisa e útil.'
         }
       });
       sessionRef.current = await sessionPromise;
     } catch (err: any) { 
-      setApiErrorMessage(err.message || "Erro de permissão de hardware.");
-      setStatusLog('ERRO HARDWARE');
+      setApiErrorMessage(`FALHA HARDWARE: ${err.message}`);
+      setStatusLog('ERRO MIC');
       cleanupAudioResources();
     }
   };
@@ -205,26 +216,30 @@ const App: React.FC = () => {
 
   return (
     <div className="h-full w-full bg-black text-white flex flex-col overflow-hidden relative font-sans italic">
+      {/* MAPA FUNDO */}
       <div className={`absolute inset-0 transition-opacity duration-1000 ${activeApp === 'nav' ? 'opacity-100' : 'opacity-20 scale-95'}`}>
         <MapView travel={travel} currentPosition={currentPos} viewMode={settings.mapStyle === '3D' ? '3D' : '2D'} onSetDestination={() => {}} />
       </div>
 
+      {/* HEADER STATUS */}
       <header className="h-[65px] bg-black/90 border-b border-white/5 flex items-center px-5 gap-5 z-[500] pointer-events-auto shrink-0 relative">
         <div className="flex items-center gap-3 pr-5 border-r border-white/10 shrink-0">
-           <div className={`w-2.5 h-2.5 rounded-full ${gpsLocked ? 'bg-emerald-500' : 'bg-red-600 animate-pulse'}`}></div>
-           <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{isStandalone ? 'STANDALONE V64' : 'GOOGLE PREVIEW'}</span>
+           <div className={`w-2 h-2 rounded-full ${gpsLocked ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]' : 'bg-red-600 animate-pulse'}`}></div>
+           <span className="text-[10px] font-black uppercase tracking-widest text-white/60">CORE V65 • {isStandalone ? 'PWA' : 'SANDBOX'}</span>
         </div>
         
         <div className="flex gap-3 overflow-x-auto no-scrollbar flex-1 items-center">
           {MEDIA_APPS.map(app => (
-            <button key={app.id} onClick={() => setActiveApp(app.id)} className={`w-12 h-12 shrink-0 rounded-2xl border flex items-center justify-center transition-all ${activeApp === app.id ? 'bg-blue-600/30 border-blue-500 scale-105 shadow-lg' : 'bg-white/5 border-white/10 opacity-50'}`}>
+            <button key={app.id} onClick={() => setActiveApp(app.id)} className={`w-12 h-12 shrink-0 rounded-2xl border flex items-center justify-center transition-all ${activeApp === app.id ? 'bg-blue-600/30 border-blue-500 scale-105 shadow-lg shadow-blue-500/20' : 'bg-white/5 border-white/10 opacity-50'}`}>
               <i className={`${app.icon} text-xl ${app.color}`}></i>
             </button>
           ))}
         </div>
       </header>
 
+      {/* MAIN CONTENT AREA */}
       <main className="flex-1 relative z-10 pointer-events-none p-6 flex flex-col justify-between overflow-hidden">
+        {/* LOGO E STATUS CENTRAL */}
         <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
             <button onClick={handleAuthOrAction} className="bg-black/95 backdrop-blur-3xl px-8 py-3 rounded-full border border-white/10 flex items-center gap-4 shadow-2xl active:scale-95 transition-all">
                <div className={`w-2 h-2 rounded-full ${isListening ? 'bg-red-500 animate-pulse' : isSpeaking ? 'bg-cyan-400 animate-pulse' : 'bg-blue-600'}`}></div>
@@ -232,6 +247,7 @@ const App: React.FC = () => {
             </button>
         </div>
 
+        {/* VELOCÍMETRO ESQUERDA */}
         <div className="w-28 pointer-events-auto">
           <div className="bg-black/90 backdrop-blur-3xl p-5 rounded-[35px] border border-white/10 shadow-2xl flex flex-col items-center">
               <span className="text-[8px] font-black text-blue-500 uppercase tracking-widest mb-1">KM/H</span>
@@ -239,6 +255,7 @@ const App: React.FC = () => {
           </div>
         </div>
 
+        {/* PAINEL DE NAVEGAÇÃO DIREITA */}
         {activeApp === 'nav' && (
           <div className="w-full max-w-[340px] pointer-events-auto self-end z-20">
              <NavigationPanel travel={travel} onAddStop={() => setIsAddStopModalOpen(true)} onSetDestination={() => setIsAddStopModalOpen(true)} onRemoveStop={() => {}} transparent />
@@ -246,13 +263,14 @@ const App: React.FC = () => {
         )}
       </main>
 
+      {/* FOOTER BAR */}
       <footer className="h-[105px] bg-black border-t border-white/5 px-6 flex items-center justify-between z-[500] pointer-events-auto shrink-0 relative">
          <div className="flex-1 max-w-[300px]">
             <MiniPlayer app={MEDIA_APPS[2]} metadata={track} onControl={() => {}} onExpand={() => setActiveApp('spotify')} transparent />
          </div>
 
          <div className="flex items-center gap-6">
-            <button onClick={handleAuthOrAction} className={`w-16 h-16 rounded-full flex items-center justify-center text-3xl transition-all active:scale-90 shadow-[0_0_40px_rgba(59,130,246,0.4)] ${isListening ? 'bg-red-600' : 'bg-blue-600'}`}>
+            <button onClick={handleAuthOrAction} className={`w-16 h-16 rounded-full flex items-center justify-center text-3xl transition-all active:scale-90 shadow-[0_0_40px_rgba(59,130,246,0.3)] ${isListening ? 'bg-red-600' : 'bg-blue-600'}`}>
                <i className={`fas ${isListening ? 'fa-stop text-sm' : 'fa-microphone'}`}></i>
             </button>
             <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-white/10 active:scale-95 shadow-2xl relative cursor-pointer" onClick={() => setIsVeoModalOpen(true)}>
@@ -261,44 +279,51 @@ const App: React.FC = () => {
          </div>
       </footer>
 
+      {/* MODAIS */}
       <SettingsMenu isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} onUpdate={setSettings} mediaApps={MEDIA_APPS} />
       <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(n, la, ln) => {
           setTravel(p => ({ ...p, destination: n.toUpperCase(), destinationCoords: [la, ln] }));
-          setStatusLog('ROTA DEFINIDA');
+          setStatusLog('VETOR DEFINIDO');
           setActiveApp('nav');
       }} />
       <VeoModal isOpen={isVeoModalOpen} onClose={() => setIsVeoModalOpen(false)} onVideoGenerated={setVeoVideoUrl} />
       
+      {/* BANNER DE DIAGNÓSTICO DE ERRO */}
       {apiErrorMessage && (
-        <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[600] w-[90%] max-w-md bg-red-600/95 p-5 rounded-3xl shadow-[0_0_50px_rgba(220,38,38,0.5)] border border-white/20 animate-bounce pointer-events-auto">
-          <div className="flex flex-col gap-3">
+        <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[1000] w-[92%] max-w-md bg-red-600 p-6 rounded-[35px] shadow-[0_0_60px_rgba(220,38,38,0.6)] border border-white/20 animate-bounce pointer-events-auto">
+          <div className="flex flex-col gap-4">
             <div className="flex justify-between items-center">
-              <span className="text-[10px] font-black uppercase tracking-widest text-white flex items-center gap-2">
-                <i className="fas fa-exclamation-triangle"></i> ERRO DE CONFIGURAÇÃO
+              <span className="text-[11px] font-black uppercase tracking-widest text-white flex items-center gap-2">
+                <i className="fas fa-exclamation-triangle"></i> ERRO DE AUTENTICAÇÃO
               </span>
               <button onClick={() => setApiErrorMessage(null)} className="text-white/40 hover:text-white"><i className="fas fa-times"></i></button>
             </div>
-            <p className="text-[9px] font-bold text-white/90 leading-relaxed bg-black/20 p-3 rounded-xl border border-white/5 uppercase italic">
-              {apiErrorMessage}
-            </p>
+            
+            <div className="bg-black/30 p-4 rounded-2xl border border-white/10">
+              <p className="text-[10px] font-bold text-white leading-relaxed uppercase italic">
+                {apiErrorMessage}
+              </p>
+            </div>
+
             <div className="flex gap-3">
               {isStandalone ? (
                 <>
-                  <button onClick={() => window.location.reload()} className="flex-1 h-12 bg-white text-red-600 rounded-2xl flex items-center justify-center text-[9px] font-black uppercase shadow-lg active:scale-95 transition-all">Recarregar</button>
-                  <a href="https://vercel.com/dashboard" target="_blank" className="flex-1 h-12 bg-black/40 rounded-2xl flex items-center justify-center text-[9px] font-black uppercase border border-white/10">Ir para Vercel</a>
+                  <button onClick={() => window.location.reload()} className="flex-1 h-14 bg-white text-red-600 rounded-2xl flex items-center justify-center text-[10px] font-black uppercase shadow-xl active:scale-95 transition-all">Sincronizar</button>
+                  <a href="https://vercel.com/dashboard" target="_blank" className="flex-1 h-14 bg-black/40 rounded-2xl flex items-center justify-center text-[10px] font-black uppercase border border-white/10 text-white/80">Vercel Panel</a>
                 </>
               ) : (
                 <button onClick={() => {
                   setApiErrorMessage(null);
                   (window as any).aistudio?.openSelectKey();
-                }} className="flex-1 h-12 bg-white text-red-600 rounded-2xl flex items-center justify-center text-[9px] font-black uppercase shadow-lg active:scale-95 transition-all">Trocar Projeto</button>
+                }} className="flex-1 h-14 bg-white text-red-600 rounded-2xl flex items-center justify-center text-[10px] font-black uppercase shadow-xl active:scale-95 transition-all">Trocar Projeto</button>
               )}
             </div>
-            <p className="text-[7px] text-center text-white/40 font-black uppercase tracking-widest italic">
+            
+            <div className="text-[7px] text-center text-white/50 font-black tracking-widest uppercase">
               {isStandalone 
-                ? "DICA: No Vercel, vá em Settings > Env Variables e crie API_KEY." 
-                : "DICA: Use um projeto com faturamento ativo."}
-            </p>
+                ? "Dica: Após salvar a env var API_KEY no Vercel, você PRECISA clicar em 'Redeploy'." 
+                : "Dica: Escolha um projeto do Google Cloud com o faturamento 'Pago' ativado."}
+            </div>
           </div>
         </div>
       )}
