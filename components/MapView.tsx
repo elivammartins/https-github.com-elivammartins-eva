@@ -21,7 +21,6 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
   useEffect(() => {
     if (typeof L === 'undefined' || !mapContainerRef.current) return;
     
-    // Inicialização segura com retry pattern
     if (!mapRef.current) {
       mapRef.current = L.map(mapContainerRef.current, { 
         zoomControl: false, 
@@ -42,12 +41,7 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
       vehicleMarkerRef.current = L.marker(currentPosition, { icon }).addTo(mapRef.current);
     }
     
-    return () => { 
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-    };
+    return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
   }, []);
 
   useEffect(() => {
@@ -74,7 +68,7 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
             style: { color: '#3b82f6', weight: 12, opacity: 0.8, lineCap: 'round', lineJoin: 'round' } 
           }).addTo(mapRef.current);
           
-          mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [80, 80], animate: true });
+          mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [100, 100], animate: true });
 
           const steps: RouteStep[] = route.legs[0].steps.map((s: any) => ({
             instruction: s.maneuver.instruction,
@@ -87,11 +81,11 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
             onRouteUpdate(steps, route.duration, route.distance);
           }
         }
-      } catch (e) { console.error("Falha no Roteamento OSRM:", e); }
+      } catch (e) { console.error("OSRM Error:", e); }
     };
 
     fetchRoute();
-  }, [travel.destinationCoords, travel.destination]);
+  }, [travel.destinationCoords]);
 
   return <div ref={mapContainerRef} className="w-full h-full bg-[#0c0c0e] animate-fade-in" />;
 };

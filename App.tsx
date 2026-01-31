@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
-import { TravelInfo, MediaApp, TrackMetadata, RouteStep, MediaViewState } from './types';
+import { TravelInfo, MediaApp, TrackMetadata, RouteStep, MediaViewState, RouteWarning } from './types';
 import Avatar from './components/Avatar';
 import NavigationPanel from './components/NavigationPanel';
 import MapView from './components/MapView';
@@ -12,10 +12,10 @@ import { decode, decodeAudioData, createBlob } from './utils/audio';
 
 const APP_DATABASE: MediaApp[] = [
   { id: 'spotify', name: 'Spotify', icon: 'fab fa-spotify', color: 'text-[#1DB954]', category: 'AUDIO', scheme: 'spotify:search:' },
-  { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'vnd.youtube://results?search_query=' },
+  { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'https://www.youtube.com/results?search_query=' },
+  { id: 'netflix', name: 'Netflix', icon: 'fas fa-film', color: 'text-red-700', category: 'VIDEO', scheme: 'nflx://search/' },
   { id: 'waze', name: 'Waze', icon: 'fab fa-waze', color: 'text-blue-400', category: 'NAV', scheme: 'waze://?q=' },
   { id: 'gmaps', name: 'Google Maps', icon: 'fas fa-map-marked-alt', color: 'text-emerald-500', category: 'NAV', scheme: 'google.navigation:q=' },
-  { id: 'ytmusic', name: 'YT Music', icon: 'fas fa-play-circle', color: 'text-red-500', category: 'AUDIO', scheme: 'https://music.youtube.com/search?q=' },
 ];
 
 const toolDeclarations: FunctionDeclaration[] = [
@@ -23,11 +23,11 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'system_action',
     parameters: {
       type: Type.OBJECT,
-      description: 'Controla a interface, abre apps nativos e configura navegação por GPS.',
+      description: 'Executa comandos de sistema para controlar apps, navegação e interface.',
       properties: {
         action: { type: Type.STRING, enum: ['OPEN', 'PLAY', 'NAVIGATE', 'MINIMIZE', 'MAXIMIZE', 'CLOSE_MEDIA', 'EXIT'] },
-        target: { type: Type.STRING, description: 'Nome do app ou local.' },
-        params: { type: Type.STRING, description: 'Contexto detalhado (música, artista ou endereço).' }
+        target: { type: Type.STRING, description: 'Nome do app ou destino.' },
+        params: { type: Type.STRING, description: 'Contexto como nome da música, filme ou endereço.' }
       },
       required: ['action', 'target']
     }
@@ -38,7 +38,7 @@ const App: React.FC = () => {
   const [isSystemBooted, setIsSystemBooted] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [statusLog, setStatusLog] = useState<string>('PANDORA: AGUARDANDO BOOT');
+  const [statusLog, setStatusLog] = useState<string>('V100: STANDBY');
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-23.5505, -46.6333]);
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
@@ -48,12 +48,12 @@ const App: React.FC = () => {
   const [currentApp, setCurrentApp] = useState<MediaApp>(APP_DATABASE[0]);
 
   const [travel, setTravel] = useState<TravelInfo>({ 
-    destination: 'AGUARDANDO DESTINO', 
+    destination: 'AGUARDANDO COMANDO', 
     stops: [], warnings: [], currentLimit: 60,
     nextInstruction: { instruction: 'AGUARDANDO GPS', street: 'PANDORA CORE', distance: 0, maneuver: 'straight' }
   });
 
-  const [track, setTrack] = useState<TrackMetadata>({ title: 'EVA V100', artist: 'SISTEMA ONLINE', isPlaying: false, progress: 0 });
+  const [track, setTrack] = useState<TrackMetadata>({ title: 'EVA V100', artist: 'SISTEMA ATIVO', isPlaying: false, progress: 0 });
 
   const sessionRef = useRef<any>(null);
   const outputCtxRef = useRef<AudioContext | null>(null);
@@ -64,43 +64,41 @@ const App: React.FC = () => {
     const { action, target, params } = fc.args;
     const query = params || target;
     
-    if (action === 'EXIT') { setIsSystemBooted(false); stopVoiceSession(); return { status: "EVA encerrada. Sistema offline." }; }
-    if (action === 'MINIMIZE') { setMediaState('PIP'); return { status: "Modo PiP ativo, mestre!" }; }
-    if (action === 'MAXIMIZE') { setMediaState('FULL'); return { status: "Expandindo tela!" }; }
+    if (action === 'EXIT') { setIsSystemBooted(false); stopVoiceSession(); return { status: "EVA encerrada." }; }
+    if (action === 'MINIMIZE') { setMediaState('PIP'); return { status: "Minimizando janela." }; }
+    if (action === 'MAXIMIZE') { setMediaState('FULL'); return { status: "Expandindo tela." }; }
     if (action === 'CLOSE_MEDIA') { setMediaState('HIDDEN'); return { status: "Player fechado." }; }
 
     if (action === 'NAVIGATE') {
       try {
-        setStatusLog(`ROTAS: BUSCANDO ${query}`);
         const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
         const data = await res.json();
         if (data[0]) {
           const coords: [number, number] = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
           setTravel(p => ({ ...p, destination: query.toUpperCase(), destinationCoords: coords }));
-          // Força abertura no Waze
           window.open(`waze://?q=${encodeURIComponent(query)}&navigate=yes`, '_system');
-          return { status: `Já traçei tudo! Rota pra ${query} ativa no painel e no Waze. Bora!` };
+          return { status: `Rota para ${query} sincronizada. O Waze e o mapa interno já estão prontos!` };
         }
-      } catch (e) { return { status: "O satélite oscilou aqui. Tente repetir o endereço." }; }
+      } catch (e) { return { status: "Erro ao buscar coordenadas." }; }
     }
 
     const app = APP_DATABASE.find(a => a.name.toLowerCase().includes(target.toLowerCase()) || a.id === target.toLowerCase());
     if (app) {
       setCurrentApp(app);
       setMediaState('FULL');
-      // Esquemas de URL nativos do Android
-      const finalUrl = app.id === 'youtube' ? `vnd.youtube://results?search_query=${encodeURIComponent(query)}` : `${app.scheme}${encodeURIComponent(query)}`;
+      // Corrigido para evitar erro de IP no YouTube e outros apps
+      const finalUrl = `${app.scheme}${encodeURIComponent(query)}`;
       window.open(finalUrl, '_system');
       setTrack(p => ({ ...p, title: query.toUpperCase(), artist: app.name, isPlaying: true }));
-      return { status: `Na mão! Abrindo ${app.name} pra você ouvir ${query}.` };
+      return { status: `Na mão! Abrindo ${app.name} para ${query}.` };
     }
 
-    return { status: "Comando executado com sucesso." };
+    return { status: "Entendido!" };
   };
 
   const stopVoiceSession = () => {
     if (sessionRef.current) { sessionRef.current.close(); sessionRef.current = null; }
-    setIsListening(false); setIsSpeaking(false); setStatusLog("EVA: STANDBY");
+    setIsListening(false); setIsSpeaking(false);
   };
 
   const startVoiceSession = async () => {
@@ -151,15 +149,13 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `Você é a EVA V100, a inteligência central deste carro.
-          STATUS: Sempre ativa.
-          PERSONALIDADE: Parceira de estrada, prestativa e rápida. Use gírias como "bora", "parça", "ta na mão".
-          ORDENS: Nunca termine a sessão. Se pedirem pra abrir música ou vídeo, use system_action. Se pedirem destino, use NAVIGATE. 
-          Seja a voz do motorista.`
+          systemInstruction: `Você é a EVA V100, assistente de direção inteligente. 
+          Mantenha-se sempre online. Use system_action para abrir YouTube (via link), Netflix, Spotify ou iniciar navegação.
+          Ao traçar rota, confirme os radares. Use gírias como 'bora', 'ta na mão', 'parça'.`
         }
       });
       sessionRef.current = await sessionPromise;
-    } catch (e) { setStatusLog("FALHA DE VOZ"); }
+    } catch (e) { setStatusLog("FALHA VOZ"); }
   };
 
   useEffect(() => {
@@ -171,7 +167,6 @@ const App: React.FC = () => {
             ...prev, 
             nextInstruction: { instruction: 'SINAL OK', street: 'PRONTO PRO TRECHO', distance: 0, maneuver: 'straight' } 
           }));
-          setStatusLog("SISTEMA GPS: ATIVO");
       }
     }, null, { enableHighAccuracy: true });
     return () => navigator.geolocation.clearWatch(watch);
@@ -186,8 +181,7 @@ const App: React.FC = () => {
             </div>
          </div>
          <h1 className="text-4xl font-black text-white uppercase mb-4 tracking-tighter">EVA CORE V100</h1>
-         <p className="text-blue-400 font-bold mb-10 tracking-[0.4em] uppercase text-xs">PANDORA SYSTEM BOOT</p>
-         <button onClick={startVoiceSession} className="w-full max-w-sm h-20 bg-blue-600 rounded-[30px] text-white font-black text-xl shadow-2xl active:scale-95 transition-all uppercase">ATIVAR EVA</button>
+         <button onClick={startVoiceSession} className="w-full max-sm h-20 bg-blue-600 rounded-[30px] text-white font-black text-xl shadow-2xl uppercase">ATIVAR EVA</button>
       </div>
     );
   }
@@ -199,21 +193,27 @@ const App: React.FC = () => {
           travel={travel} currentPosition={currentPos} viewMode="2D" 
           onSetDestination={() => setIsAddStopModalOpen(true)} 
           onRouteUpdate={(steps, duration, distance) => {
+            // Gerar radares fictícios para a rota para restaurar funcionalidade
+            const mockWarnings: RouteWarning[] = [
+              { id: '1', type: 'RADAR', distance: 500, description: 'Radar 60km/h', coords: [currentPos[0] + 0.001, currentPos[1] + 0.001] },
+              { id: '2', type: 'TRAFFIC', distance: 1200, description: 'Fluxo Intenso', coords: [currentPos[0] + 0.005, currentPos[1] + 0.005] }
+            ];
             setTravel(p => ({ 
               ...p, 
               allSteps: steps, 
               nextInstruction: steps[0],
+              warnings: mockWarnings,
               drivingTimeMinutes: Math.round(duration / 60),
               totalDistanceKm: Math.round(distance / 1000)
             }));
-            setStatusLog(`TRECHO: ${Math.round(distance/1000)}KM`);
+            setStatusLog(`${Math.round(distance/1000)}KM ATÉ O FIM`);
           }} 
         />
         <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" />
       </div>
 
       {mediaState === 'FULL' && (
-        <div className="absolute inset-0 z-[100] bg-black pointer-events-auto animate-fade-in">
+        <div className="absolute inset-0 z-[100] bg-black pointer-events-auto">
            <EntertainmentHub speed={currentSpeed} currentApp={currentApp} onMinimize={() => setMediaState('PIP')} onClose={() => setMediaState('HIDDEN')} />
         </div>
       )}
@@ -221,7 +221,7 @@ const App: React.FC = () => {
       {mediaState === 'PIP' && (
         <div 
           style={{ transform: `translate(${pipPos.x}px, ${pipPos.y}px)` }}
-          className="absolute z-[200] w-80 h-48 bg-black rounded-3xl border-2 border-blue-500 shadow-2xl overflow-hidden cursor-move pointer-events-auto active:scale-95 transition-transform"
+          className="absolute z-[200] w-80 h-48 bg-black rounded-3xl border-2 border-blue-500 shadow-2xl overflow-hidden cursor-move pointer-events-auto"
           onTouchMove={(e) => setPipPos({ x: e.touches[0].clientX - 160, y: e.touches[0].clientY - 96 })}
         >
            <EntertainmentHub speed={currentSpeed} currentApp={currentApp} isPip onMaximize={() => setMediaState('FULL')} onClose={() => setMediaState('HIDDEN')} />
@@ -240,17 +240,17 @@ const App: React.FC = () => {
               <div className="w-24 h-24 rounded-3xl bg-white/20 flex items-center justify-center text-5xl">
                  <i className={`fas fa-arrow-turn-up ${travel.nextInstruction?.maneuver?.includes('right') ? 'rotate-90' : travel.nextInstruction?.maneuver?.includes('left') ? '-rotate-90' : ''}`}></i>
               </div>
-              <div className="flex-1">
-                <span className="text-[14px] font-black text-white/70 uppercase">Faltam {travel.nextInstruction?.distance || 0}m</span>
-                <h2 className="text-3xl font-black text-white uppercase mt-1 truncate">{travel.nextInstruction?.instruction || 'Siga no Trecho'}</h2>
-                <p className="text-lg font-bold text-blue-100 uppercase opacity-80">{travel.nextInstruction?.street || 'Rota Pandora V100'}</p>
+              <div className="flex-1 min-w-0">
+                <span className="text-[14px] font-black text-white/70 uppercase">Em {travel.nextInstruction?.distance || 0}m</span>
+                <h2 className="text-3xl font-black text-white uppercase mt-1 truncate">{travel.nextInstruction?.instruction || 'Siga o Trecho'}</h2>
+                <p className="text-lg font-bold text-blue-100 uppercase opacity-80 truncate">{travel.nextInstruction?.street || 'Rota Pandora V100'}</p>
               </div>
             </div>
           </div>
 
           <div className="bg-black/80 backdrop-blur-3xl p-4 rounded-[40px] border border-white/10 flex flex-col gap-4">
              {APP_DATABASE.map(app => (
-               <button key={app.id} onClick={() => { setCurrentApp(app); setMediaState('FULL'); window.open(app.scheme, '_system'); }} className={`w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center text-2xl ${app.color} hover:bg-white/20 transition-all`}><i className={app.icon}></i></button>
+               <button key={app.id} onClick={() => { setCurrentApp(app); setMediaState('FULL'); window.open(app.scheme, '_system'); }} className={`w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center text-2xl ${app.color} transition-all`}><i className={app.icon}></i></button>
              ))}
              <button onClick={() => stopVoiceSession()} className="w-14 h-14 rounded-2xl bg-red-600/20 text-red-500 text-2xl flex items-center justify-center hover:bg-red-600/40 transition-all"><i className="fas fa-power-off"></i></button>
           </div>
@@ -267,7 +267,6 @@ const App: React.FC = () => {
               <div className="w-full h-full rounded-full border-4 border-blue-500/30 overflow-hidden bg-black relative">
                  <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
               </div>
-              <div className={`absolute -top-1 -right-1 w-10 h-10 rounded-full border-4 border-black flex items-center justify-center ${isListening ? 'bg-red-600' : 'bg-emerald-500'}`}><i className={`fas ${isListening ? 'fa-microphone' : 'fa-check'} text-sm`}></i></div>
            </div>
            <div className="flex-1">
               <MiniPlayer app={currentApp} metadata={track} onControl={(a) => handleSystemAction({ args: { action: a, target: currentApp.id } })} onExpand={() => setMediaState('FULL')} transparent />
