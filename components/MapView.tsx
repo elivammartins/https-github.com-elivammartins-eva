@@ -40,8 +40,14 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
 
       vehicleMarkerRef.current = L.marker(currentPosition, { icon }).addTo(mapRef.current);
     }
+
+    // Corrigir bug de "tela preta" forçando o redimensionamento do motor
+    const timer = setInterval(() => { if (mapRef.current) mapRef.current.invalidateSize(); }, 2000);
     
-    return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
+    return () => { 
+      clearInterval(timer);
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } 
+    };
   }, []);
 
   useEffect(() => {
@@ -81,13 +87,13 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
             onRouteUpdate(steps, route.duration, route.distance);
           }
         }
-      } catch (e) { console.error("OSRM Engine Error:", e); }
+      } catch (e) { console.error("OSRM Erro:", e); }
     };
 
     fetchRoute();
-  }, [travel.destinationCoords, travel.destination]);
+  }, [travel.destinationCoords]);
 
-  return <div ref={mapContainerRef} className="w-full h-full bg-[#0c0c0e] animate-fade-in" />;
+  return <div ref={mapContainerRef} className="w-full h-full bg-[#0c0c0e]" />;
 };
 
 export default MapView;
