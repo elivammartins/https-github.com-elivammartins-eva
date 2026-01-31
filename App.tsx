@@ -13,7 +13,7 @@ import { decode, decodeAudioData, createBlob } from './utils/audio';
 const MEDIA_APPS: MediaApp[] = [
   { id: 'nav', name: 'Navegação', icon: 'fas fa-location-arrow', color: 'text-emerald-400', category: 'NAV' },
   { id: 'spotify', name: 'Spotify', icon: 'fab fa-spotify', color: 'text-[#1DB954]', category: 'AUDIO' },
-  { id: 'engine', name: 'Status', icon: 'fas fa-microchip', color: 'text-orange-500', category: 'METRICS' },
+  { id: 'engine', name: 'Veículo', icon: 'fas fa-car-side', color: 'text-orange-500', category: 'METRICS' },
 ];
 
 const App: React.FC = () => {
@@ -62,9 +62,8 @@ const App: React.FC = () => {
     setApiErrorMessage(null);
     try {
       const apiKey = process.env.API_KEY;
-      
       if (!apiKey || apiKey === 'undefined' || apiKey === '') {
-        setApiErrorMessage("ERRO CRÍTICO: Chave não encontrada. No Vercel, certifique-se de que a variável 'API_KEY' está salva e você clicou em 'Redeploy'.");
+        setApiErrorMessage("ERRO: API_KEY não configurada no Vercel.");
         return;
       }
 
@@ -119,25 +118,16 @@ const App: React.FC = () => {
               sourcesRef.current.add(source);
             }
           },
-          onerror: (e: any) => { 
-            setApiErrorMessage(`ERRO DE REDE: ${e.message}`);
-            cleanupAudioResources();
-          },
-          onclose: () => { 
-            setStatusLog('PANDORA: PRONTA'); 
-            cleanupAudioResources(); 
-          },
+          onerror: (e: any) => { setApiErrorMessage(`API: ${e.message}`); cleanupAudioResources(); },
+          onclose: () => { setStatusLog('PANDORA: PRONTA'); cleanupAudioResources(); },
         },
         config: {
           responseModalities: [Modality.AUDIO],
-          systemInstruction: 'Você é a EVA, assistente veicular inteligente da Pandora. Responda de forma curta e prestativa em Português Brasileiro.'
+          systemInstruction: 'Você é a EVA, assistente de voz da Pandora. Responda curto.'
         }
       });
       sessionRef.current = await sessionPromise;
-    } catch (err: any) { 
-      setApiErrorMessage(`ERRO DE HARDWARE: ${err.message}`);
-      cleanupAudioResources();
-    }
+    } catch (err: any) { setApiErrorMessage(`Hardware: ${err.message}`); cleanupAudioResources(); }
   };
 
   useEffect(() => {
@@ -154,116 +144,138 @@ const App: React.FC = () => {
   }, []);
 
   return (
-    <div className="h-full w-full bg-black text-white flex flex-col overflow-hidden relative font-sans italic select-none">
+    <div className="h-screen w-screen bg-black text-white overflow-hidden relative font-sans italic">
       
-      {/* Background Mapa */}
-      <div className={`absolute inset-0 transition-opacity duration-1000 ${activeApp === 'nav' ? 'opacity-100' : 'opacity-20 blur-sm'}`}>
-        <MapView travel={travel} currentPosition={currentPos} viewMode="2D" onSetDestination={() => {}} />
+      {/* CAMADA 0: O MAPA (BACKGROUND TOTAL) */}
+      <div className="absolute inset-0 z-0">
+        <MapView 
+          travel={travel} 
+          currentPosition={currentPos} 
+          viewMode="2D" 
+          onSetDestination={() => {}} 
+        />
+        {/* Overlay gradiente para garantir leitura do HUD */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80 pointer-events-none"></div>
       </div>
 
-      {/* Header HUD */}
-      <header className="h-[60px] bg-black/80 backdrop-blur-lg border-b border-white/5 flex items-center px-6 gap-4 z-[50] shrink-0">
-        <div className="flex items-center gap-3 pr-4 border-r border-white/10 shrink-0">
-           <div className={`w-2 h-2 rounded-full ${gpsLocked ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-red-600 animate-pulse'}`}></div>
-           <span className="text-[10px] font-black uppercase tracking-widest text-white/50">PANDORA CORE V67</span>
-        </div>
-        <div className="flex gap-2 overflow-x-auto no-scrollbar flex-1 items-center">
-          {MEDIA_APPS.map(app => (
-            <button key={app.id} onClick={() => setActiveApp(app.id)} className={`h-10 px-4 shrink-0 rounded-xl border flex items-center gap-2 transition-all ${activeApp === app.id ? 'bg-blue-600/30 border-blue-500 text-blue-400' : 'bg-white/5 border-white/5 text-white/30'}`}>
-              <i className={`${app.icon} text-xs`}></i>
-              <span className="text-[9px] font-black uppercase">{app.name}</span>
-            </button>
-          ))}
-        </div>
-      </header>
-
-      {/* Main Focus Area */}
-      <main className="flex-1 relative z-10 p-6 flex flex-col items-center justify-between pointer-events-none">
+      {/* CAMADA 1: HUD DE CONTROLE (FLUTUANTE) */}
+      <div className="relative z-10 h-full w-full flex flex-col pointer-events-none">
         
-        {/* Velocímetro */}
-        <div className="w-full flex justify-start pointer-events-auto">
-          <div className="bg-black/90 backdrop-blur-2xl p-6 rounded-[40px] border border-white/10 shadow-2xl flex flex-col items-center min-w-[120px]">
-              <span className="text-[10px] font-black text-blue-500 uppercase mb-1">KM/H</span>
-              <span className="text-6xl font-black leading-none italic tracking-tighter">{currentSpeed}</span>
+        {/* Header HUD */}
+        <header className="h-[70px] flex items-center px-6 gap-4 shrink-0 pointer-events-auto">
+          <div className="bg-black/80 backdrop-blur-md rounded-2xl border border-white/10 px-4 py-2 flex items-center gap-3">
+             <div className={`w-2 h-2 rounded-full ${gpsLocked ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-red-600 animate-pulse'}`}></div>
+             <span className="text-[10px] font-black uppercase tracking-widest text-white/50">PANDORA CORE V67</span>
           </div>
-        </div>
+          <div className="flex gap-2 overflow-x-auto no-scrollbar flex-1 items-center">
+            {MEDIA_APPS.map(app => (
+              <button 
+                key={app.id} 
+                onClick={() => setActiveApp(app.id)} 
+                className={`h-11 px-5 shrink-0 rounded-2xl border flex items-center gap-3 transition-all bg-black/80 backdrop-blur-md ${activeApp === app.id ? 'border-blue-500 text-blue-400' : 'border-white/5 text-white/30'}`}
+              >
+                <i className={`${app.icon} text-xs`}></i>
+                <span className="text-[9px] font-black uppercase tracking-widest">{app.name}</span>
+              </button>
+            ))}
+          </div>
+        </header>
 
-        {/* EVA Avatar - O centro de comando com movimento */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-auto">
-            <div 
-              onClick={() => isListening ? cleanupAudioResources() : startVoiceSession()}
-              className={`relative w-56 h-56 lg:w-72 lg:h-72 rounded-full flex items-center justify-center transition-all duration-500 cursor-pointer ${isListening ? 'scale-110' : 'scale-100'}`}
-            >
-               <div className={`absolute inset-0 rounded-full border-4 border-blue-500/20 animate-ping-slow ${isListening || isSpeaking ? 'opacity-100' : 'opacity-0'}`}></div>
-               <div className={`absolute -inset-4 rounded-full bg-blue-500/10 blur-3xl transition-opacity duration-500 ${isListening || isSpeaking ? 'opacity-100' : 'opacity-0'}`}></div>
-               <div className="w-full h-full rounded-full border-2 border-white/10 overflow-hidden shadow-[0_0_80px_rgba(37,99,235,0.2)] bg-black relative">
-                  <Avatar isListening={isListening} isSpeaking={isSpeaking} videoUrl={veoVideoUrl} onAnimateClick={() => {}} />
-                  {isListening && (
-                    <div className="absolute bottom-10 left-0 right-0 flex justify-center gap-1 h-8 items-end">
-                       {[1,2,3,4,5].map(i => (
-                         <div key={i} className="w-1.5 bg-white rounded-full animate-wave" style={{ animationDelay: `${i*0.1}s` }}></div>
-                       ))}
-                    </div>
-                  )}
-               </div>
-               <div className={`absolute -bottom-4 bg-white text-black px-6 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-2xl transition-all ${isListening ? 'bg-red-600 text-white animate-pulse' : ''}`}>
-                  {statusLog}
-               </div>
+        {/* Central HUD - Avatar & Velocímetro */}
+        <main className="flex-1 relative flex flex-col items-center justify-between p-6">
+          
+          {/* Velocímetro Top-Left */}
+          <div className="w-full flex justify-start pointer-events-auto">
+            <div className="bg-black/90 backdrop-blur-3xl p-6 rounded-[40px] border border-white/10 shadow-2xl flex flex-col items-center min-w-[130px]">
+                <span className="text-[10px] font-black text-blue-500 uppercase mb-1">KM/H</span>
+                <span className="text-6xl font-black leading-none italic tracking-tighter">{currentSpeed}</span>
             </div>
-        </div>
-
-        {/* Navigation Info */}
-        {activeApp === 'nav' && (
-          <div className="w-full max-w-[340px] pointer-events-auto self-end">
-             <NavigationPanel travel={travel} onAddStop={() => setIsAddStopModalOpen(true)} onSetDestination={() => setIsAddStopModalOpen(true)} onRemoveStop={() => {}} transparent />
           </div>
-        )}
-      </main>
 
-      {/* Player Footer */}
-      <footer className="h-[100px] bg-black border-t border-white/5 px-8 flex items-center justify-between z-[50] shrink-0 pointer-events-auto">
-         <div className="flex-1 max-w-[300px]">
-            <MiniPlayer app={MEDIA_APPS[1]} metadata={track} onControl={() => {}} onExpand={() => setActiveApp('spotify')} transparent />
-         </div>
-         <div className="flex items-center gap-4">
-            <button onClick={() => setIsVeoModalOpen(true)} className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-xl opacity-50 hover:opacity-100 transition-opacity">
-               <i className="fas fa-video"></i>
-            </button>
-            <button onClick={() => setIsAddStopModalOpen(true)} className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-xl opacity-50 hover:opacity-100 transition-opacity">
-               <i className="fas fa-map-pin"></i>
-            </button>
-         </div>
-      </footer>
+          {/* EVA AVATAR CENTRAL */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-auto">
+              <div 
+                onClick={() => isListening ? cleanupAudioResources() : startVoiceSession()}
+                className={`relative w-60 h-60 lg:w-80 lg:h-80 rounded-full flex items-center justify-center transition-all duration-500 cursor-pointer ${isListening ? 'scale-110' : 'scale-100 hover:scale-105'}`}
+              >
+                 <div className={`absolute inset-0 rounded-full border-4 border-blue-500/20 animate-ping-slow ${isListening || isSpeaking ? 'opacity-100' : 'opacity-0'}`}></div>
+                 <div className="w-full h-full rounded-full border-2 border-white/10 overflow-hidden shadow-[0_0_100px_rgba(37,99,235,0.3)] bg-black relative">
+                    <Avatar isListening={isListening} isSpeaking={isSpeaking} videoUrl={veoVideoUrl} onAnimateClick={() => {}} />
+                    {isListening && (
+                      <div className="absolute bottom-12 left-0 right-0 flex justify-center gap-1.5 h-10 items-end">
+                         {[1,2,3,4,5,6].map(i => (
+                           <div key={i} className="w-1.5 bg-blue-400 rounded-full animate-wave shadow-[0_0_10px_rgba(96,165,250,0.8)]" style={{ animationDelay: `${i*0.1}s` }}></div>
+                         ))}
+                      </div>
+                    )}
+                 </div>
+                 <div className={`absolute -bottom-6 bg-white text-black px-8 py-2.5 rounded-full font-black text-[11px] uppercase tracking-widest shadow-2xl transition-all ${isListening ? 'bg-red-600 text-white animate-pulse' : 'bg-blue-600 text-white'}`}>
+                    {statusLog}
+                 </div>
+              </div>
+          </div>
 
-      {/* Overlay de Erro de Build/Config */}
+          {/* Painel de Navegação Bottom-Right */}
+          <div className="w-full max-w-[360px] pointer-events-auto self-end">
+             {activeApp === 'nav' && (
+               <NavigationPanel 
+                  travel={travel} 
+                  onAddStop={() => setIsAddStopModalOpen(true)} 
+                  onSetDestination={() => setIsAddStopModalOpen(true)} 
+                  onRemoveStop={() => {}} 
+                  transparent 
+               />
+             )}
+          </div>
+        </main>
+
+        {/* Footer HUD - Music Player */}
+        <footer className="h-[110px] px-8 flex items-center justify-between pointer-events-auto shrink-0">
+           <div className="flex-1 max-w-[320px] bg-black/90 backdrop-blur-3xl rounded-[30px] border border-white/10 p-4 shadow-2xl">
+              <MiniPlayer app={MEDIA_APPS[1]} metadata={track} onControl={() => {}} onExpand={() => setActiveApp('spotify')} transparent />
+           </div>
+           <div className="flex items-center gap-4 ml-6">
+              <button onClick={() => setIsVeoModalOpen(true)} className="w-16 h-16 rounded-3xl bg-black/90 backdrop-blur-3xl border border-white/10 flex items-center justify-center text-2xl shadow-xl hover:bg-blue-600 transition-colors">
+                 <i className="fas fa-video"></i>
+              </button>
+              <button onClick={() => setIsAddStopModalOpen(true)} className="w-16 h-16 rounded-3xl bg-black/90 backdrop-blur-3xl border border-white/10 flex items-center justify-center text-2xl shadow-xl hover:bg-emerald-600 transition-colors">
+                 <i className="fas fa-map-pin"></i>
+              </button>
+           </div>
+        </footer>
+      </div>
+
+      {/* Modais e Overlays */}
       {apiErrorMessage && (
-        <div className="fixed inset-0 z-[1000] bg-black/90 backdrop-blur-xl flex items-center justify-center p-8 text-center animate-fade-in pointer-events-auto">
+        <div className="fixed inset-0 z-[2000] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-8 text-center animate-fade-in">
           <div className="max-w-md flex flex-col gap-6">
-             <i className="fas fa-microchip text-5xl text-red-600"></i>
-             <h2 className="text-2xl font-black uppercase italic">Falha de Injeção</h2>
-             <p className="text-xs font-bold text-white/60 uppercase italic tracking-widest leading-relaxed">
-               {apiErrorMessage}
-             </p>
-             <button onClick={() => window.location.reload()} className="h-16 bg-white text-black rounded-2xl font-black uppercase text-xs active:scale-95 transition-all">Sincronizar Novamente</button>
-             <button onClick={() => setApiErrorMessage(null)} className="text-[10px] font-black text-white/30 uppercase underline">Ignorar Erro</button>
+             <i className="fas fa-shield-virus text-6xl text-red-600 mb-2"></i>
+             <h2 className="text-3xl font-black uppercase italic tracking-tighter">Erro de Sistema</h2>
+             <p className="text-xs font-bold text-white/50 uppercase tracking-widest leading-relaxed px-4">{apiErrorMessage}</p>
+             <button onClick={() => window.location.reload()} className="h-16 bg-white text-black rounded-3xl font-black uppercase text-xs shadow-2xl active:scale-95 transition-all">Sincronizar Novamente</button>
           </div>
         </div>
       )}
 
       <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(n, la, ln) => {
-          setTravel(p => ({ ...p, destination: n.toUpperCase(), destinationCoords: [la, ln] }));
+          setTravel(p => ({ 
+            ...p, 
+            destination: n.toUpperCase(), 
+            destinationCoords: [la, ln],
+            nextInstruction: { instruction: 'Rota iniciada', distance: '100m', icon: 'fa-arrow-up' }
+          }));
           setIsAddStopModalOpen(false);
           setActiveApp('nav');
       }} />
       <VeoModal isOpen={isVeoModalOpen} onClose={() => setIsVeoModalOpen(false)} onVideoGenerated={setVeoVideoUrl} />
 
       <style>{`
-        @keyframes ping-slow { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(1.6); opacity: 0; } }
+        @keyframes ping-slow { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(1.8); opacity: 0; } }
         @keyframes wave { 0%, 100% { height: 20%; } 50% { height: 100%; } }
         @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-        .animate-ping-slow { animation: ping-slow 2s cubic-bezier(0, 0, 0.2, 1) infinite; }
+        .animate-ping-slow { animation: ping-slow 2.5s cubic-bezier(0, 0, 0.2, 1) infinite; }
         .animate-wave { animation: wave 0.5s ease-in-out infinite; }
-        .animate-fade-in { animation: fade-in 0.3s ease-out; }
+        .animate-fade-in { animation: fade-in 0.4s ease-out; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
       `}</style>
     </div>

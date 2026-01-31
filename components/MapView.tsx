@@ -17,10 +17,10 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition }) => {
   const routeLayerRef = useRef<any>(null);
   const vehicleMarkerRef = useRef<any>(null);
 
+  // Inicialização do Mapa
   useEffect(() => {
     if (typeof L === 'undefined' || !mapContainerRef.current) return;
 
-    // Limpeza rigorosa para evitar tela branca em re-render
     if (mapRef.current) {
       mapRef.current.remove();
       mapRef.current = null;
@@ -29,22 +29,28 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition }) => {
     mapRef.current = L.map(mapContainerRef.current, {
       zoomControl: false,
       attributionControl: false,
-      center: currentPosition[0] === 0 ? [-23.5505, -46.6333] : currentPosition,
+      center: currentPosition,
       zoom: 16,
       dragging: true,
       scrollWheelZoom: true,
-      tap: true
+      tap: true,
+      boxZoom: false,
+      doubleClickZoom: false
     });
 
+    // Estilo "Dark Night" para painéis de carro
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { 
       maxZoom: 20 
     }).addTo(mapRef.current);
 
     const vehicleIcon = L.divIcon({
       className: 'custom-vehicle-icon',
-      html: `<div style="width: 26px; height: 26px; background: #2563eb; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px rgba(37,99,235,0.7);"><i class="fas fa-location-arrow" style="color: white; transform: rotate(45deg); font-size: 11px;"></i></div>`,
-      iconSize: [26, 26],
-      iconAnchor: [13, 13]
+      html: `
+        <div style="width: 32px; height: 32px; background: rgba(37,99,235,0.9); border: 2px solid white; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 20px rgba(37,99,235,1);">
+          <i class="fas fa-location-arrow" style="color: white; transform: rotate(45deg); font-size: 14px;"></i>
+        </div>`,
+      iconSize: [32, 32],
+      iconAnchor: [16, 16]
     });
     
     vehicleMarkerRef.current = L.marker(currentPosition, { 
@@ -52,9 +58,9 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition }) => {
       zIndexOffset: 1000 
     }).addTo(mapRef.current);
 
-    // Observer de tamanho
+    // Ajuste de tamanho automático quando a janela redimensiona
     const ro = new ResizeObserver(() => {
-      mapRef.current?.invalidateSize();
+      if (mapRef.current) mapRef.current.invalidateSize();
     });
     ro.observe(mapContainerRef.current);
 
@@ -65,25 +71,32 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition }) => {
         mapRef.current = null;
       }
     };
-  }, []); // Só inicializa uma vez
+  }, []);
 
+  // Atualiza posição do veículo
   useEffect(() => {
     if (mapRef.current && vehicleMarkerRef.current) {
       vehicleMarkerRef.current.setLatLng(currentPosition);
+      // Se não houver rota ativa, segue o veículo
       if (!travel.destinationCoords) {
-        mapRef.current.panTo(currentPosition, { animate: true });
+        mapRef.current.panTo(currentPosition, { animate: true, duration: 1.0 });
       }
     }
-  }, [currentPosition]);
+  }, [currentPosition, travel.destinationCoords]);
 
+  // Busca e Traça a Rota (OSRM)
   useEffect(() => {
     const fetchRoute = async () => {
       const map = mapRef.current;
-      if (!map || !travel.destinationCoords) return;
+      if (!map || !travel.destinationCoords) {
+        if (routeLayerRef.current) map.removeLayer(routeLayerRef.current);
+        return;
+      }
 
       if (routeLayerRef.current) map.removeLayer(routeLayerRef.current);
 
       const destPos = travel.destinationCoords;
+      // OSRM espera Lng,Lat
       const coords = `${currentPosition[1]},${currentPosition[0]};${destPos[1]},${destPos[0]}`;
       
       try {
@@ -92,12 +105,24 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition }) => {
 
         if (data.routes && data.routes[0]) {
           routeLayerRef.current = L.geoJSON(data.routes[0].geometry, {
-            style: { color: '#3b82f6', weight: 5, opacity: 0.8 }
+            style: { 
+              color: '#3b82f6', 
+              weight: 8, 
+              opacity: 0.8,
+              lineJoin: 'round',
+              shadowBlur: 10,
+              shadowColor: '#1d4ed8'
+            }
           }).addTo(map);
-          map.fitBounds(routeLayerRef.current.getBounds(), { padding: [30, 30] });
+
+          // Ajusta a visão para mostrar a rota inteira
+          map.fitBounds(routeLayerRef.current.getBounds(), { padding: [100, 100], animate: true });
         }
-      } catch (e) { }
+      } catch (e) {
+        console.error("Erro ao traçar rota:", e);
+      }
     };
+
     fetchRoute();
   }, [travel.destinationCoords]);
 
