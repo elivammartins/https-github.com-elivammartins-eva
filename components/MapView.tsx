@@ -9,7 +9,7 @@ interface MapViewProps {
   currentPosition: [number, number];
   viewMode: '2D' | '3D';
   onSetDestination: () => void;
-  onRouteUpdate?: (steps: RouteStep[]) => void;
+  onRouteUpdate?: (steps: RouteStep[], duration: number, distance: number) => void;
 }
 
 const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdate }) => {
@@ -20,26 +20,41 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
 
   useEffect(() => {
     if (typeof L === 'undefined' || !mapContainerRef.current) return;
-    mapRef.current = L.map(mapContainerRef.current, { zoomControl: false, attributionControl: false, center: currentPosition, zoom: 17 });
+    
+    mapRef.current = L.map(mapContainerRef.current, { 
+      zoomControl: false, 
+      attributionControl: false, 
+      center: currentPosition, 
+      zoom: 16 
+    });
+
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(mapRef.current);
     
     const icon = L.divIcon({
-      className: 'vehicle-v90',
-      html: `<div style="width: 45px; height: 45px; background: #3b82f6; border: 4px solid white; border-radius: 50%; box-shadow: 0 0 40px #3b82f6; display: flex; align-items: center; justify-content: center; transform: rotate(45deg);"><i class="fas fa-location-arrow" style="color: white; font-size: 20px;"></i></div>`,
-      iconSize: [45, 45], iconAnchor: [22, 22]
+      className: 'vehicle-v100',
+      html: `<div style="width: 50px; height: 50px; background: #3b82f6; border: 4px solid white; border-radius: 50%; box-shadow: 0 0 40px #3b82f6; display: flex; align-items: center; justify-content: center;"><i class="fas fa-location-arrow" style="color: white; font-size: 22px; transform: rotate(-45deg);"></i></div>`,
+      iconSize: [50, 50], iconAnchor: [25, 25]
     });
+
     vehicleMarkerRef.current = L.marker(currentPosition, { icon }).addTo(mapRef.current);
+    
     return () => { if (mapRef.current) mapRef.current.remove(); };
   }, []);
 
   useEffect(() => {
-    if (vehicleMarkerRef.current) vehicleMarkerRef.current.setLatLng(currentPosition);
-    if (mapRef.current && !travel.destinationCoords) mapRef.current.setView(currentPosition);
-  }, [currentPosition]);
+    if (vehicleMarkerRef.current) {
+      vehicleMarkerRef.current.setLatLng(currentPosition);
+    }
+    // Se não houver destino, segue o veículo
+    if (mapRef.current && !travel.destinationCoords) {
+      mapRef.current.panTo(currentPosition);
+    }
+  }, [currentPosition, travel.destinationCoords]);
 
   useEffect(() => {
     const getDetailedRoute = async () => {
       if (!mapRef.current || !travel.destinationCoords) return;
+      
       if (routeLayerRef.current) mapRef.current.removeLayer(routeLayerRef.current);
 
       const url = `https://router.project-osrm.org/route/v1/driving/${currentPosition[1]},${currentPosition[0]};${travel.destinationCoords[1]},${travel.destinationCoords[0]}?overview=full&geometries=geojson&steps=true&languages=pt-BR`;
@@ -47,24 +62,33 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
       try {
         const res = await fetch(url);
         const data = await res.json();
+        
         if (data.routes?.[0]) {
           const route = data.routes[0];
-          routeLayerRef.current = L.geoJSON(route.geometry, { style: { color: '#3b82f6', weight: 12, opacity: 0.8 } }).addTo(mapRef.current);
-          mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [150, 150] });
+          routeLayerRef.current = L.geoJSON(route.geometry, { 
+            style: { color: '#3b82f6', weight: 12, opacity: 0.8, lineCap: 'round' } 
+          }).addTo(mapRef.current);
+          
+          mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [100, 100] });
 
-          // Mapeia os passos para o formato da EVA
           const steps: RouteStep[] = route.legs[0].steps.map((s: any) => ({
-            instruction: s.maneuver.type === 'turn' ? `Vire à ${s.maneuver.modifier === 'right' ? 'Direita' : 'Esquerda'}` : s.maneuver.instruction,
-            street: s.name || 'Via Desconhecida',
+            instruction: s.maneuver.instruction,
+            street: s.name || 'Via Principal',
             distance: Math.round(s.distance),
             maneuver: s.maneuver.modifier || 'straight'
           }));
-          if (onRouteUpdate) onRouteUpdate(steps);
+
+          if (onRouteUpdate) {
+            onRouteUpdate(steps, route.duration, route.distance);
+          }
         }
-      } catch (e) { console.error(e); }
+      } catch (e) { 
+        console.error("GPS Error:", e);
+      }
     };
+
     getDetailedRoute();
-  }, [travel.destinationCoords]);
+  }, [travel.destinationCoords, travel.destination]);
 
   return <div id="map-container" ref={mapContainerRef} className="w-full h-full" />;
 };
