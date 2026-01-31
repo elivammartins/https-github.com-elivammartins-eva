@@ -6,6 +6,8 @@ export interface LocationData {
   heading: number | null;
 }
 
+export type MediaViewState = 'FULL' | 'PIP' | 'HIDDEN';
+
 export type WarningType = 'RADAR' | 'ACCIDENT' | 'HAZARD' | 'POLICE' | 'TRAFFIC';
 
 export interface RouteStep {
@@ -59,7 +61,6 @@ export interface MediaApp {
   scheme: string;
 }
 
-// Interface for recommended stops used in RecommendationCard
 export interface StopRecommendation {
   name: string;
   type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'OTHER';
@@ -68,13 +69,11 @@ export interface StopRecommendation {
   coords?: [number, number];
 }
 
-// Interface for global application settings used in SettingsMenu
 export interface AppSettings {
   userName: string;
   voiceVolume: number;
 }
 
-// Interface for meeting information used in MeetingView
 export interface MeetingInfo {
   id: string;
   title: string;

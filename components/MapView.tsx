@@ -21,33 +21,42 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
   useEffect(() => {
     if (typeof L === 'undefined' || !mapContainerRef.current) return;
     
-    mapRef.current = L.map(mapContainerRef.current, { 
-      zoomControl: false, 
-      attributionControl: false, 
-      center: currentPosition, 
-      zoom: 16 
-    });
+    // Inicialização segura do mapa
+    if (!mapRef.current) {
+      mapRef.current = L.map(mapContainerRef.current, { 
+        zoomControl: false, 
+        attributionControl: false, 
+        center: currentPosition, 
+        zoom: 16,
+        fadeAnimation: true,
+        markerZoomAnimation: true
+      });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(mapRef.current);
-    
-    const icon = L.divIcon({
-      className: 'vehicle-v100',
-      html: `<div style="width: 50px; height: 50px; background: #3b82f6; border: 4px solid white; border-radius: 50%; box-shadow: 0 0 40px #3b82f6; display: flex; align-items: center; justify-content: center;"><i class="fas fa-location-arrow" style="color: white; font-size: 22px; transform: rotate(-45deg);"></i></div>`,
-      iconSize: [50, 50], iconAnchor: [25, 25]
-    });
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(mapRef.current);
+      
+      const icon = L.divIcon({
+        className: 'vehicle-v100',
+        html: `<div style="width: 50px; height: 50px; background: #3b82f6; border: 4px solid white; border-radius: 50%; box-shadow: 0 0 40px #3b82f6; display: flex; align-items: center; justify-content: center;"><i class="fas fa-location-arrow" style="color: white; font-size: 22px; transform: rotate(-45deg);"></i></div>`,
+        iconSize: [50, 50], iconAnchor: [25, 25]
+      });
 
-    vehicleMarkerRef.current = L.marker(currentPosition, { icon }).addTo(mapRef.current);
+      vehicleMarkerRef.current = L.marker(currentPosition, { icon }).addTo(mapRef.current);
+    }
     
-    return () => { if (mapRef.current) mapRef.current.remove(); };
+    return () => { 
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
-    if (vehicleMarkerRef.current) {
+    if (vehicleMarkerRef.current && mapRef.current) {
       vehicleMarkerRef.current.setLatLng(currentPosition);
-    }
-    // Se não houver destino, segue o veículo
-    if (mapRef.current && !travel.destinationCoords) {
-      mapRef.current.panTo(currentPosition);
+      if (!travel.destinationCoords) {
+        mapRef.current.panTo(currentPosition, { animate: true });
+      }
     }
   }, [currentPosition, travel.destinationCoords]);
 
@@ -55,8 +64,6 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
     const getDetailedRoute = async () => {
       if (!mapRef.current || !travel.destinationCoords) return;
       
-      if (routeLayerRef.current) mapRef.current.removeLayer(routeLayerRef.current);
-
       const url = `https://router.project-osrm.org/route/v1/driving/${currentPosition[1]},${currentPosition[0]};${travel.destinationCoords[1]},${travel.destinationCoords[0]}?overview=full&geometries=geojson&steps=true&languages=pt-BR`;
       
       try {
@@ -64,12 +71,14 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
         const data = await res.json();
         
         if (data.routes?.[0]) {
+          if (routeLayerRef.current) mapRef.current.removeLayer(routeLayerRef.current);
+
           const route = data.routes[0];
           routeLayerRef.current = L.geoJSON(route.geometry, { 
-            style: { color: '#3b82f6', weight: 12, opacity: 0.8, lineCap: 'round' } 
+            style: { color: '#3b82f6', weight: 10, opacity: 0.8, lineCap: 'round', lineJoin: 'round' } 
           }).addTo(mapRef.current);
           
-          mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [100, 100] });
+          mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [100, 100], animate: true });
 
           const steps: RouteStep[] = route.legs[0].steps.map((s: any) => ({
             instruction: s.maneuver.instruction,
@@ -83,14 +92,14 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
           }
         }
       } catch (e) { 
-        console.error("GPS Error:", e);
+        console.error("Erro no motor de rota OSRM:", e);
       }
     };
 
     getDetailedRoute();
   }, [travel.destinationCoords, travel.destination]);
 
-  return <div id="map-container" ref={mapContainerRef} className="w-full h-full" />;
+  return <div id="map-container" ref={mapContainerRef} className="w-full h-full bg-[#0c0c0e] animate-fade-in" />;
 };
 
 export default MapView;
