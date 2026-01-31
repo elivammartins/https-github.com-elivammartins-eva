@@ -29,8 +29,8 @@ const toolDeclarations: FunctionDeclaration[] = [
       description: 'Executa comandos de sistema no Android Auto.',
       properties: {
         action: { type: Type.STRING, enum: ['OPEN', 'PLAY', 'NAVIGATE', 'MINIMIZE', 'MAXIMIZE', 'CLOSE_MEDIA', 'EXIT'] },
-        target: { type: Type.STRING, description: 'App alvo (ex: netflix, youtube).' },
-        params: { type: Type.STRING, description: 'BUSCA TÉCNICA: O Nome exato do episódio resolvido pela sua base de dados.' }
+        target: { type: Type.STRING, description: 'App alvo (netflix, youtube, globoplay, max, etc).' },
+        params: { type: Type.STRING, description: 'STRING DE BUSCA TÉCNICA: O Nome oficial e completo da obra/episódio conforme consta no catálogo original do streaming.' }
       },
       required: ['action', 'target']
     }
@@ -41,7 +41,7 @@ const App: React.FC = () => {
   const [isSystemBooted, setIsSystemBooted] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [statusLog, setStatusLog] = useState<string>('PANDORA CORE V100');
+  const [statusLog, setStatusLog] = useState<string>('EVA CORE V100 ACTIVE');
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-23.5505, -46.6333]);
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
@@ -67,9 +67,9 @@ const App: React.FC = () => {
     const { action, target, params } = fc.args;
     let finalQuery = params || target || "";
 
-    if (action === 'EXIT') { setIsSystemBooted(false); stopVoiceSession(); return { status: "Offline." }; }
-    if (action === 'MINIMIZE') { setMediaState('PIP'); return { status: "PIP Ativo." }; }
-    if (action === 'MAXIMIZE') { setMediaState('FULL'); return { status: "Full Screen." }; }
+    if (action === 'EXIT') { setIsSystemBooted(false); stopVoiceSession(); return { status: "Saindo." }; }
+    if (action === 'MINIMIZE') { setMediaState('PIP'); return { status: "Minimizado." }; }
+    if (action === 'MAXIMIZE') { setMediaState('FULL'); return { status: "Expandido." }; }
 
     if (action === 'NAVIGATE') {
       try {
@@ -79,7 +79,7 @@ const App: React.FC = () => {
           const coords: [number, number] = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
           setTravel(p => ({ ...p, destination: finalQuery.toUpperCase(), destinationCoords: coords }));
           window.open(`waze://?q=${encodeURIComponent(finalQuery)}&navigate=yes`, '_system');
-          return { status: `Vetor ajustado para ${finalQuery}.` };
+          return { status: `GPS: ${finalQuery}.` };
         }
       } catch (e) { return { status: "Erro GPS." }; }
     }
@@ -94,11 +94,11 @@ const App: React.FC = () => {
       const finalUrl = `${app.scheme}${encodeURIComponent(finalQuery)}`;
       window.open(finalUrl, '_system');
       
-      setStatusLog(`MÍDIA: ${finalQuery.toUpperCase()}`);
-      return { status: `Lançando ${finalQuery} no ${app.name}.` };
+      setStatusLog(`PLAYER: ${finalQuery.toUpperCase()}`);
+      return { status: `Lançando busca técnica: ${finalQuery}.` };
     }
 
-    return { status: "Executado." };
+    return { status: "Concluído." };
   };
 
   const startVoiceSession = async () => {
@@ -149,19 +149,22 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `Você é a EVA V100. Sua missão é ser o co-piloto mais inteligente do mundo.
-          PROTOCOLOS DE CATÁLOGO (MUITO IMPORTANTE):
-          1. Você tem acesso mental a TODOS os nomes de episódios de todas as séries (Netflix, Globoplay, Max, etc).
-          2. Quando o motorista pedir por ordem (ex: "Coloca o primeiro de Stranger Things"), você NUNCA deve enviar apenas "episódio 1".
-          3. Você deve RESOLVER o nome: Identifique que T1E1 é "O Desaparecimento de Will Byers".
-          4. No comando system_action, o parâmetro 'params' deve conter: "[Nome da Série] Temporada [X] Episódio [Y] - [Nome do Episódio]".
-          5. Antes de abrir o app, diga verbalmente o nome do episódio para o motorista: "Com certeza! Localizei o episódio 1: 'O Desaparecimento de Will Byers'. Abrindo no Netflix agora."
-          6. Se pedirem "o próximo", "o anterior", "o último" ou ordinais (primeiro ao centésimo), use sua base de dados interna para encontrar o título exato.
-          7. Mantenha o tom profissional, mas levemente sarcástico se o motorista estiver devagar ou rápido demais.`
+          systemInstruction: `Você é a EVA V100, assistente de IA para Android Auto.
+          PROTOCOLOS DE BUSCA TÉCNICA (MUITO IMPORTANTE):
+          1. Sua base de conhecimento contém os nomes oficiais de episódios e temporadas de séries.
+          2. Quando o motorista pedir algo como "Episódio primeiro" ou "Episódio 1", você deve IGNORAR a palavra "episódio" dita por ele e RESOLVER o nome oficial no catálogo.
+             EXEMPLO: Motorista diz "Stranger Things episódio primeiro".
+             VOCÊ RESOLVE: "Stranger Things Capítulo Um: O Desaparecimento de Will Byers".
+             VOCÊ CHAMA system_action: params="Stranger Things Capítulo Um: O Desaparecimento de Will Byers".
+          3. NUNCA envie apenas "episódio 1" ou "episódio um" se o catálogo oficial usar outro termo (como "Capítulo Um", "Parte 1", etc).
+          4. Se o catálogo oficial usa o formato "S01E01", use-o no params. O objetivo é que o motor de busca do app (Netflix, YouTube, Max, Globoplay) encontre o vídeo EXATO.
+          5. Antes de abrir, diga o nome oficial: "Entendido. Iniciando 'Capítulo Um: O Desaparecimento de Will Byers' de Stranger Things no Netflix."
+          6. Se o motorista não souber o app, use Netflix para séries e YouTube para vídeos genéricos.
+          7. Mantenha as respostas curtas e focadas na execução.`
         }
       });
       sessionRef.current = await sessionPromise;
-    } catch (e) { setStatusLog("CORE ERROR"); }
+    } catch (e) { setStatusLog("CORE OFFLINE"); }
   };
 
   const stopVoiceSession = () => {
@@ -186,7 +189,7 @@ const App: React.FC = () => {
             </div>
          </div>
          <h1 className="text-4xl font-black text-white uppercase mb-4 tracking-tighter">EVA CORE V100</h1>
-         <button onClick={startVoiceSession} className="w-full max-w-sm h-20 bg-blue-600 rounded-[30px] text-white font-black text-xl shadow-2xl uppercase">SYSTEM BOOT</button>
+         <button onClick={startVoiceSession} className="w-full max-w-sm h-20 bg-blue-600 rounded-[30px] text-white font-black text-xl shadow-2xl uppercase">BOOT SYSTEM</button>
       </div>
     );
   }
@@ -230,7 +233,7 @@ const App: React.FC = () => {
         <header className="flex justify-between items-start pointer-events-auto">
           <div className="bg-black/80 backdrop-blur-3xl p-10 rounded-[60px] border border-white/10 shadow-2xl flex flex-col items-center">
             <span className={`text-[10rem] font-black italic tracking-tighter leading-none ${currentSpeed > 60 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{currentSpeed}</span>
-            <div className="font-black text-blue-500 uppercase text-xs mt-2 tracking-widest">KM/H • HUD STATUS</div>
+            <div className="font-black text-blue-500 uppercase text-xs mt-2 tracking-widest">KM/H • HUD ACTIVE</div>
           </div>
 
           <div className="flex-1 mx-8">
@@ -240,7 +243,7 @@ const App: React.FC = () => {
               </div>
               <div className="flex-1 min-w-0">
                 <span className="text-xs font-black text-white/70 uppercase">Em {travel.nextInstruction?.distance || 0}m</span>
-                <h2 className="text-3xl font-black text-white uppercase truncate leading-none mb-1">{travel.nextInstruction?.instruction || 'Siga o Fluxo'}</h2>
+                <h2 className="text-3xl font-black text-white uppercase truncate leading-none mb-1">{travel.nextInstruction?.instruction || 'Siga o Trecho'}</h2>
                 <p className="text-lg font-bold text-blue-100 uppercase opacity-80 truncate">{travel.nextInstruction?.street || 'Rota Pandora V100'}</p>
               </div>
             </div>
