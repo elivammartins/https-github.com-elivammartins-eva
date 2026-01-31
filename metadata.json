@@ -1,0 +1,12 @@
+{
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "name": "PANDORA CORE V53",
+  "short_name": "EVA",
+  "description": "Co-Piloto Inteligente Multi-modal - PANDORA EVA V53",
+  "theme_color": "#000000",
+  "background_color": "#000000"
+}
