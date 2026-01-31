@@ -21,15 +21,14 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
   useEffect(() => {
     if (typeof L === 'undefined' || !mapContainerRef.current) return;
     
-    // Inicialização segura do mapa
+    // Inicialização segura com retry pattern
     if (!mapRef.current) {
       mapRef.current = L.map(mapContainerRef.current, { 
         zoomControl: false, 
         attributionControl: false, 
         center: currentPosition, 
         zoom: 16,
-        fadeAnimation: true,
-        markerZoomAnimation: true
+        fadeAnimation: true
       });
 
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(mapRef.current);
@@ -52,16 +51,12 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
   }, []);
 
   useEffect(() => {
-    if (vehicleMarkerRef.current && mapRef.current) {
-      vehicleMarkerRef.current.setLatLng(currentPosition);
-      if (!travel.destinationCoords) {
-        mapRef.current.panTo(currentPosition, { animate: true });
-      }
-    }
+    if (vehicleMarkerRef.current) vehicleMarkerRef.current.setLatLng(currentPosition);
+    if (mapRef.current && !travel.destinationCoords) mapRef.current.panTo(currentPosition, { animate: true });
   }, [currentPosition, travel.destinationCoords]);
 
   useEffect(() => {
-    const getDetailedRoute = async () => {
+    const fetchRoute = async () => {
       if (!mapRef.current || !travel.destinationCoords) return;
       
       const url = `https://router.project-osrm.org/route/v1/driving/${currentPosition[1]},${currentPosition[0]};${travel.destinationCoords[1]},${travel.destinationCoords[0]}?overview=full&geometries=geojson&steps=true&languages=pt-BR`;
@@ -70,15 +65,16 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
         const res = await fetch(url);
         const data = await res.json();
         
-        if (data.routes?.[0]) {
+        if (data.routes && data.routes.length > 0) {
+          const route = data.routes[0];
+          
           if (routeLayerRef.current) mapRef.current.removeLayer(routeLayerRef.current);
 
-          const route = data.routes[0];
           routeLayerRef.current = L.geoJSON(route.geometry, { 
-            style: { color: '#3b82f6', weight: 10, opacity: 0.8, lineCap: 'round', lineJoin: 'round' } 
+            style: { color: '#3b82f6', weight: 12, opacity: 0.8, lineCap: 'round', lineJoin: 'round' } 
           }).addTo(mapRef.current);
           
-          mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [100, 100], animate: true });
+          mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [80, 80], animate: true });
 
           const steps: RouteStep[] = route.legs[0].steps.map((s: any) => ({
             instruction: s.maneuver.instruction,
@@ -91,15 +87,13 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
             onRouteUpdate(steps, route.duration, route.distance);
           }
         }
-      } catch (e) { 
-        console.error("Erro no motor de rota OSRM:", e);
-      }
+      } catch (e) { console.error("Falha no Roteamento OSRM:", e); }
     };
 
-    getDetailedRoute();
+    fetchRoute();
   }, [travel.destinationCoords, travel.destination]);
 
-  return <div id="map-container" ref={mapContainerRef} className="w-full h-full bg-[#0c0c0e] animate-fade-in" />;
+  return <div ref={mapContainerRef} className="w-full h-full bg-[#0c0c0e] animate-fade-in" />;
 };
 
 export default MapView;
