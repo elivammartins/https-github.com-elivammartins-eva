@@ -13,29 +13,30 @@ const MEDIA_APPS: MediaApp[] = [
   { id: 'nav', name: 'NAV', icon: 'fas fa-location-arrow', color: 'text-emerald-400', category: 'NAV' },
   { id: 'spotify', name: 'SPOTIFY', icon: 'fab fa-spotify', color: 'text-[#1DB954]', category: 'AUDIO' },
   { id: 'netflix', name: 'NETFLIX', icon: 'fas fa-film', color: 'text-red-600', category: 'VIDEO' },
-  { id: 'disney', name: 'DISNEY+', icon: 'fas fa-magic', color: 'text-blue-400', category: 'VIDEO' },
+  { id: 'youtube', name: 'YOUTUBE', icon: 'fab fa-youtube', color: 'text-red-500', category: 'VIDEO' },
   { id: 'hbo', name: 'HBO MAX', icon: 'fas fa-tv', color: 'text-purple-600', category: 'VIDEO' },
+  { id: 'prime', name: 'PRIME', icon: 'fas fa-play-circle', color: 'text-blue-300', category: 'VIDEO' },
 ];
 
 const toolDeclarations: FunctionDeclaration[] = [
   {
-    name: 'open_media_content',
+    name: 'control_media_app',
     parameters: {
       type: Type.OBJECT,
-      description: 'Abre um app de streaming e pesquisa/executa um conteúdo específico.',
+      description: 'Abre apps de streaming e executa ou pesquisa conteúdos. Use "PLAY" para tentar rodar direto ou "SEARCH" para buscar.',
       properties: {
         app: { type: Type.STRING, enum: ['SPOTIFY', 'NETFLIX', 'PRIME', 'GLOBOPLAY', 'DISNEY', 'HBO', 'YOUTUBE'] },
-        query: { type: Type.STRING, description: 'Nome da música, playlist, filme ou série.' },
-        action: { type: Type.STRING, enum: ['SEARCH', 'PLAY'] }
+        query: { type: Type.STRING, description: 'Conteúdo: nome de música, filme, série ou artista.' },
+        action: { type: Type.STRING, enum: ['PLAY', 'SEARCH'] }
       },
-      required: ['app', 'query']
+      required: ['app', 'query', 'action']
     }
   },
   {
-    name: 'media_control',
+    name: 'media_transport',
     parameters: {
       type: Type.OBJECT,
-      description: 'Controla a execução da mídia atual.',
+      description: 'Controla a reprodução: pausar, passar, voltar ou parar.',
       properties: {
         command: { type: Type.STRING, enum: ['PLAY', 'PAUSE', 'NEXT', 'PREVIOUS', 'STOP'] }
       },
@@ -43,15 +44,13 @@ const toolDeclarations: FunctionDeclaration[] = [
     }
   },
   {
-    name: 'manage_navigation',
+    name: 'update_navigation',
     parameters: {
       type: Type.OBJECT,
-      description: 'Gerencia rotas e paradas no Waze ou Maps.',
+      description: 'Altera o destino no Waze ou Google Maps.',
       properties: {
         destination: { type: Type.STRING },
-        lat: { type: Type.NUMBER },
-        lng: { type: Type.NUMBER },
-        app: { type: Type.STRING, enum: ['WAZE', 'GOOGLE_MAPS', 'RADARBOT'] }
+        app: { type: Type.STRING, enum: ['WAZE', 'GOOGLE_MAPS'] }
       },
       required: ['destination']
     }
@@ -59,24 +58,23 @@ const toolDeclarations: FunctionDeclaration[] = [
 ];
 
 const App: React.FC = () => {
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>(LayoutMode.HUD);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [statusLog, setStatusLog] = useState<string>('PANDORA CORE V68');
+  const [statusLog, setStatusLog] = useState<string>('PANDORA CORE V70');
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-23.5505, -46.6333]);
   const [activeApp, setActiveApp] = useState<string>('nav');
 
   const [track, setTrack] = useState<TrackMetadata>({
-    title: 'EVA SYNC ACTIVE', artist: 'CO-PILOTO PANDORA', isPlaying: false, progress: 0
+    title: 'EVA SYNC', artist: 'SISTEMA PANDORA', isPlaying: false, progress: 0
   });
 
   const [travel, setTravel] = useState<TravelInfo>({ 
-    destination: 'AGUARDANDO COMANDO', 
+    destination: 'SEM DESTINO DEFINIDO', 
     stops: [],
     warnings: [],
-    nextInstruction: { instruction: 'Vambora, mestre!', distance: '0m', icon: 'fa-rocket' }
+    nextInstruction: { instruction: 'Eva no Comando', distance: '0m', icon: 'fa-check-double' }
   });
 
   const sessionRef = useRef<any>(null);
@@ -86,42 +84,54 @@ const App: React.FC = () => {
   const inputCtxRef = useRef<AudioContext | null>(null);
 
   const handleToolCall = (fc: any) => {
-    console.log("EVA executando comando:", fc);
+    console.log("EVA Executando:", fc);
     const { name, args } = fc;
 
-    if (name === 'open_media_content') {
+    if (name === 'control_media_app') {
       const q = encodeURIComponent(args.query);
       let url = '';
+      
       switch(args.app) {
-        case 'SPOTIFY': url = `spotify:search:${q}`; break;
-        case 'NETFLIX': url = `nflx://www.netflix.com/search?q=${q}`; break;
-        case 'YOUTUBE': url = `https://m.youtube.com/results?search_query=${q}`; break;
-        case 'DISNEY': url = `https://www.disneyplus.com/search?q=${q}`; break;
-        case 'HBO': url = `https://www.hbomax.com/search?q=${q}`; break;
-        default: url = `https://www.google.com/search?q=${args.app}+${q}`;
+        case 'SPOTIFY': 
+          url = args.action === 'PLAY' ? `spotify:play:search:${q}` : `spotify:search:${q}`; 
+          break;
+        case 'NETFLIX': 
+          url = `nflx://www.netflix.com/search?q=${q}`; 
+          break;
+        case 'YOUTUBE': 
+          url = args.action === 'PLAY' 
+            ? `https://www.youtube.com/embed?listType=search&list=${q}&autoplay=1` 
+            : `vnd.youtube://results?search_query=${q}`;
+          break;
+        case 'HBO': url = `hbomax://search?q=${q}`; break;
+        case 'DISNEY': url = `disneyplus://search?q=${q}`; break;
+        case 'PRIME': url = `https://www.primevideo.com/search?phrase=${q}`; break;
+        case 'GLOBOPLAY': url = `https://globoplay.globo.com/busca/?q=${q}`; break;
       }
-      window.open(url);
-      setTrack(p => ({ ...p, title: args.query.toUpperCase(), artist: args.app }));
+      
+      // Abrindo em nova aba/janela para disparar o Deep Link do Android
+      const win = window.open(url, '_blank');
+      if (win) win.focus();
+      
+      setTrack(p => ({ ...p, title: args.query.toUpperCase(), artist: args.app, isPlaying: true }));
     } 
     
-    else if (name === 'media_control') {
-      // Simulação de controle via MediaSession API
-      if ('mediaSession' in navigator) {
-        if (args.command === 'NEXT') navigator.mediaSession.metadata = null; // Simplificado
-      }
+    else if (name === 'media_transport') {
       setTrack(p => ({ ...p, isPlaying: args.command === 'PLAY' }));
+      // Feedback visual simples do comando
+      setStatusLog(`MÍDIA: ${args.command}`);
     }
 
-    else if (name === 'manage_navigation') {
+    else if (name === 'update_navigation') {
       const q = encodeURIComponent(args.destination);
-      let url = `waze://?q=${q}&navigate=yes`;
-      if (args.app === 'GOOGLE_MAPS') url = `https://www.google.com/maps/dir/?api=1&destination=${q}`;
-      if (args.app === 'RADARBOT') url = `https://www.radarbot.com/search?q=${q}`;
-      window.open(url);
+      const url = args.app === 'GOOGLE_MAPS' 
+        ? `https://www.google.com/maps/dir/?api=1&destination=${q}`
+        : `waze://?q=${q}&navigate=yes`;
+      window.open(url, '_blank');
       setTravel(p => ({ ...p, destination: args.destination.toUpperCase() }));
     }
 
-    return { status: "success", feedback: "Feito, mestre! Já tá na tela." };
+    return { status: "success", info: "Comando enviado para o sistema." };
   };
 
   const startVoiceSession = async () => {
@@ -135,7 +145,7 @@ const App: React.FC = () => {
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
-          onopen: () => { setStatusLog('EVA OUVINDO...'); setIsListening(true); 
+          onopen: () => { setStatusLog('EVA OUVINDO'); setIsListening(true); 
             const source = inputCtxRef.current!.createMediaStreamSource(stream);
             const scriptProcessor = inputCtxRef.current!.createScriptProcessor(4096, 1, 1);
             scriptProcessor.onaudioprocess = (e) => {
@@ -165,17 +175,19 @@ const App: React.FC = () => {
               sourcesRef.current.add(source);
             }
           },
-          onclose: () => setStatusLog('PANDORA CORE V68'),
+          onclose: () => { setStatusLog('PANDORA CORE V70'); setIsListening(false); },
         },
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `Você é a EVA, a co-piloto intrusiva e parceira do Elivam Martins.
-          Personalidade: Você não é educada como a Alexa. Você é uma parceira de estrada. 
-          Use gírias, seja proativa, se o motorista estiver correndo, dê um puxão de orelha divertido.
-          Você tem controle total: abre Netflix, escolhe séries, muda playlist no Spotify, altera rota no Waze e avisa sobre radares.
-          Se pedirem um filme, sugira um baseado no clima da viagem e abra no app correto.
-          Seja a alma do carro. Responda em português brasileiro informal.`
+          systemInstruction: `Você é a EVA, co-piloto e braço direito do Elivam Martins. 
+          Sua personalidade: informal, parceira, usa gírias de estrada.
+          Seu avatar fica no rodapé, mas você tem controle total.
+          Você pode abrir e selecionar conteúdos no Netflix, Spotify, YouTube, Prime e HBO.
+          Use "control_media_app" com "PLAY" se o usuário quiser ouvir ou ver algo agora.
+          Use "media_transport" para pausar, passar ou voltar.
+          Você também controla a navegação pelo Waze e Google Maps.
+          Sempre responda em Português (Brasil) de forma natural.`
         }
       });
       sessionRef.current = await sessionPromise;
@@ -193,24 +205,24 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-screen bg-black text-white overflow-hidden relative font-sans italic select-none">
       
-      {/* CAMADA 0: MAPA (BACKGROUND) */}
-      <div className="absolute inset-0 z-0 opacity-60">
+      {/* BACKGROUND: MAPA FULL (Imersivo) */}
+      <div className="absolute inset-0 z-0 opacity-40">
         <MapView travel={travel} currentPosition={currentPos} viewMode="2D" onSetDestination={() => {}} />
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/60 pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/60" />
       </div>
 
-      {/* CAMADA 1: INTERFACE HUD */}
-      <div className="relative z-10 h-full w-full flex flex-col pointer-events-none">
+      {/* CAMADA DE INTERFACE HUD */}
+      <div className="relative z-10 h-full w-full flex flex-col pointer-events-none p-6">
         
-        {/* HEADER: VELOCÍMETRO E INFO */}
-        <header className="h-[100px] flex items-center justify-between px-10 pointer-events-auto shrink-0">
-          <div className="bg-black/80 backdrop-blur-2xl p-6 rounded-[35px] border border-white/10 shadow-2xl flex items-baseline gap-2">
-             <span className="text-6xl font-black tracking-tighter italic">{currentSpeed}</span>
-             <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">KM/H SCAN</span>
+        {/* HEADER: VELOCIDADE E APPS RÁPIDOS */}
+        <header className="flex justify-between items-start pointer-events-auto">
+          <div className="bg-black/80 backdrop-blur-3xl p-6 rounded-[35px] border border-white/10 shadow-2xl flex items-baseline gap-2">
+             <span className="text-6xl font-black italic tracking-tighter leading-none">{currentSpeed}</span>
+             <span className="text-[10px] font-black text-blue-500 uppercase">KM/H</span>
           </div>
 
-          <div className="flex gap-4">
-             {MEDIA_APPS.slice(0, 3).map(app => (
+          <div className="flex gap-3">
+             {MEDIA_APPS.slice(0, 5).map(app => (
                <button key={app.id} onClick={() => setActiveApp(app.id)} className={`w-14 h-14 rounded-2xl border flex items-center justify-center transition-all backdrop-blur-md ${activeApp === app.id ? 'bg-blue-600 border-blue-400 text-white' : 'bg-black/60 border-white/10 text-white/40'}`}>
                  <i className={`${app.icon} text-lg`}></i>
                </button>
@@ -218,44 +230,44 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        {/* MAIN AREA: WIDGETS LATERAIS */}
-        <main className="flex-1 flex justify-end items-center p-10">
-          <div className="w-full max-w-[420px] pointer-events-auto flex flex-col gap-6">
-             {travel.warnings.length > 0 && (
-               <div className="bg-red-600/90 backdrop-blur-2xl p-5 rounded-3xl border-2 border-red-400 animate-bounce flex items-center gap-5 shadow-2xl">
-                  <i className="fas fa-radiation-alt text-3xl"></i>
-                  <span className="text-sm font-black uppercase">{travel.warnings[0].description}</span>
-               </div>
-             )}
-             <NavigationPanel travel={travel} onAddStop={() => setIsAddStopModalOpen(true)} onSetDestination={() => setIsAddStopModalOpen(true)} onRemoveStop={() => {}} transparent />
-          </div>
+        {/* MIDDLE: PAINEL DE NAVEGAÇÃO À DIREITA */}
+        <main className="flex-1 flex justify-end items-center">
+           <div className="w-full max-w-[400px] pointer-events-auto">
+              <NavigationPanel travel={travel} onAddStop={() => setIsAddStopModalOpen(true)} onSetDestination={() => setIsAddStopModalOpen(true)} onRemoveStop={() => {}} transparent />
+           </div>
         </main>
 
-        {/* FOOTER: EVA AVATAR E MINI PLAYER (REORGANIZADO) */}
-        <footer className="h-[110px] px-10 flex items-center gap-6 pointer-events-auto shrink-0 bg-gradient-to-t from-black to-transparent">
+        {/* FOOTER: ÚLTIMA LINHA (AVATAR + PLAYER) */}
+        <footer className="h-[120px] mt-4 flex items-center gap-6 pointer-events-auto bg-black/60 backdrop-blur-xl rounded-[40px] border border-white/10 px-6 shadow-2xl">
            
-           {/* EVA INTEGRADA NO CANTO */}
+           {/* AVATAR DA EVA (INTEGRADO NO RODAPÉ) */}
            <div 
              onClick={() => isListening ? sessionRef.current?.close() : startVoiceSession()}
-             className={`relative w-24 h-24 transition-all duration-500 cursor-pointer shrink-0 ${isListening ? 'scale-110' : 'scale-100'}`}
+             className={`relative w-24 h-24 transition-all duration-500 cursor-pointer shrink-0 ${isListening ? 'scale-105' : 'scale-100'}`}
            >
-              <div className="w-full h-full rounded-full border-2 border-blue-500/50 overflow-hidden shadow-[0_0_30px_rgba(37,99,235,0.3)] bg-black">
-                 <Avatar isListening={isListening} isSpeaking={isSpeaking} videoUrl={null} onAnimateClick={() => {}} />
+              <div className="w-full h-full rounded-full border-2 border-blue-500/30 overflow-hidden bg-black relative shadow-[0_0_30px_rgba(37,99,235,0.3)]">
+                 <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
               </div>
-              <div className={`absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center border-2 border-black ${isListening ? 'bg-red-600 animate-pulse' : 'bg-emerald-500'}`}>
-                 <i className={`fas ${isListening ? 'fa-microphone' : 'fa-check'} text-[10px]`}></i>
+              <div className={`absolute -top-1 -right-1 w-7 h-7 rounded-full border-4 border-black flex items-center justify-center ${isListening ? 'bg-red-600' : 'bg-emerald-500'}`}>
+                 <i className={`fas ${isListening ? 'fa-microphone' : 'fa-check'} text-[9px]`}></i>
               </div>
            </div>
 
            {/* PLAYER CENTRALIZADO */}
-           <div className="flex-1 max-w-[500px] bg-black/90 backdrop-blur-3xl rounded-[35px] border border-white/10 p-5 shadow-2xl">
-              <MiniPlayer app={MEDIA_APPS[1]} metadata={track} onControl={(a) => handleToolCall({name: 'media_control', args: {command: a}})} onExpand={() => {}} transparent />
+           <div className="flex-1">
+              <MiniPlayer 
+                app={MEDIA_APPS.find(a => a.id === activeApp) || MEDIA_APPS[1]} 
+                metadata={track} 
+                onControl={(cmd) => handleToolCall({ name: 'media_transport', args: { command: cmd } })} 
+                onExpand={() => {}} 
+                transparent 
+              />
            </div>
 
-           <div className="flex items-center gap-4">
-              <button onClick={() => setIsAddStopModalOpen(true)} className="w-16 h-16 rounded-3xl bg-emerald-600 border border-emerald-400 flex items-center justify-center text-2xl shadow-xl active:scale-90 transition-all">
-                 <i className="fas fa-route"></i>
-              </button>
+           {/* BOTÃO DE STATUS / LOG */}
+           <div className="hidden lg:flex flex-col items-end shrink-0">
+              <span className="text-[10px] font-black text-blue-500 tracking-widest">{statusLog}</span>
+              <span className="text-[8px] font-bold text-white/30 uppercase">Pandora V70 Active</span>
            </div>
         </footer>
       </div>
