@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { AppSettings, MediaApp, PlayerProfile } from '../types';
+import { AppSettings, MediaApp } from '../types';
 
 interface SettingsMenuProps {
   isOpen: boolean;
@@ -10,19 +10,8 @@ interface SettingsMenuProps {
   mediaApps: MediaApp[];
 }
 
-const SettingsMenu: React.FC<SettingsMenuProps> = ({ isOpen, onClose, settings, onUpdate, mediaApps }) => {
+const SettingsMenu: React.FC<SettingsMenuProps> = ({ isOpen, onClose, settings, onUpdate }) => {
   if (!isOpen) return null;
-
-  const updateProfile = (appName: string, profileName: string) => {
-    const newProfiles = [...settings.playerProfiles];
-    const idx = newProfiles.findIndex(p => p.appName === appName);
-    if (idx >= 0) {
-      newProfiles[idx].profileName = profileName;
-    } else {
-      newProfiles.push({ appName, profileName });
-    }
-    onUpdate({ ...settings, playerProfiles: newProfiles });
-  };
 
   return (
     <div className="fixed inset-0 z-[10000] flex flex-col items-center justify-center p-6 italic uppercase animate-fade-in">
@@ -30,13 +19,42 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ isOpen, onClose, settings, 
       
       <div className="relative w-full max-w-2xl bg-[#0c0c0e] rounded-[40px] border border-white/10 flex flex-col shadow-2xl overflow-hidden animate-scale-up max-h-[90dvh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-8 border-b border-white/5 flex justify-between items-center bg-gradient-to-r from-blue-900/10 to-transparent shrink-0">
-          <h2 className="text-2xl font-black tracking-tighter text-white">Configurações Pandora</h2>
+          <h2 className="text-2xl font-black tracking-tighter text-white">Privacidade & Sistema</h2>
           <button onClick={onClose} className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl text-white border border-white/5">
             <i className="fas fa-times"></i>
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-8 space-y-8 no-scrollbar">
+          {/* MODO PRIVACIDADE */}
+          <div className="flex flex-col gap-4">
+             <div className="flex justify-between items-center">
+                <label className="text-[10px] font-black text-blue-400 tracking-widest uppercase">Modo Privacidade (Ghost)</label>
+                <button 
+                  onClick={() => onUpdate({...settings, privacyMode: !settings.privacyMode})}
+                  className={`w-14 h-8 rounded-full relative transition-all ${settings.privacyMode ? 'bg-blue-600' : 'bg-white/10'}`}
+                >
+                   <div className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${settings.privacyMode ? 'left-7' : 'left-1'}`}></div>
+                </button>
+             </div>
+             <p className="text-[9px] text-white/30 lowercase">Quando ativo, a EVA não mostrará nomes ou lerá mensagens em voz alta sem autorização.</p>
+          </div>
+
+          {/* LIMITE DE MENSAGENS */}
+          <div className="flex flex-col gap-4">
+             <label className="text-[10px] font-black text-blue-400 tracking-widest uppercase">Leitura de Mensagens</label>
+             <div className="grid grid-cols-2 gap-4">
+                <button 
+                  onClick={() => onUpdate({...settings, messageLimit: 128})}
+                  className={`h-14 rounded-2xl border font-black text-[10px] transition-all ${settings.messageLimit === 128 ? 'bg-blue-600 border-blue-400' : 'bg-white/5 border-white/5 text-white/40'}`}
+                >RESUMO (128 CHARS)</button>
+                <button 
+                  onClick={() => onUpdate({...settings, messageLimit: 'full'})}
+                  className={`h-14 rounded-2xl border font-black text-[10px] transition-all ${settings.messageLimit === 'full' ? 'bg-blue-600 border-blue-400' : 'bg-white/5 border-white/5 text-white/40'}`}
+                >TEXTO COMPLETO</button>
+             </div>
+          </div>
+
           <div className="flex flex-col gap-4">
              <label className="text-[10px] font-black text-blue-400 tracking-widest uppercase">ID do Condutor</label>
              <input 
@@ -47,36 +65,14 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ isOpen, onClose, settings, 
              />
           </div>
 
-          <div className="space-y-4">
-            <label className="text-[10px] font-black text-blue-400 tracking-widest uppercase">Perfis de Streaming</label>
-            {['Netflix', 'Globoplay', 'Disney+'].map(app => (
-              <div key={app} className="flex gap-4 items-center bg-white/5 p-4 rounded-2xl border border-white/5">
-                <span className="w-24 text-xs font-bold text-white/60">{app}</span>
-                <input 
-                  type="text"
-                  placeholder="Nome do Perfil"
-                  value={settings.playerProfiles.find(p => p.appName === app)?.profileName || ''}
-                  onChange={(e) => updateProfile(app, e.target.value)}
-                  className="flex-1 h-10 bg-black/40 border border-white/10 rounded-xl px-4 text-sm font-bold outline-none focus:border-blue-500 text-white"
-                />
-              </div>
-            ))}
-          </div>
-
           <div className="flex flex-col gap-6">
              <label className="text-[10px] font-black text-blue-400 tracking-widest uppercase">Volume do Sistema</label>
-             <div className="p-4 bg-white/5 rounded-2xl border border-white/5 flex flex-col gap-3">
-                <input 
-                  type="range" min="0" max="100" 
-                  value={settings.voiceVolume}
-                  onChange={(e) => onUpdate({...settings, voiceVolume: parseInt(e.target.value)})}
-                  className="w-full accent-blue-600 h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer"
-                />
-             </div>
-          </div>
-          
-          <div className="p-4 bg-blue-600/10 rounded-2xl border border-blue-500/20 text-center">
-             <p className="text-[8px] font-black text-blue-400 tracking-widest uppercase">Pandora Core V110 Stable</p>
+             <input 
+               type="range" min="0" max="100" 
+               value={settings.voiceVolume}
+               onChange={(e) => onUpdate({...settings, voiceVolume: parseInt(e.target.value)})}
+               className="w-full accent-blue-600 h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer"
+             />
           </div>
         </div>
 

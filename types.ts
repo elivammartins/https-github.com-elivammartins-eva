@@ -50,38 +50,25 @@ export interface TravelInfo {
   currentLimit?: number;
 }
 
-export interface MeetingInfo {
-  id: string;
-  title: string;
-  startTime: string;
-  participants: number;
-}
-
-export interface TrackMetadata {
-  title: string;
-  artist: string;
-  isPlaying: boolean;
-  progress: number;
-}
-
-export interface MediaApp {
-  id: string;
+export interface Contact {
   name: string;
-  icon: string;
-  color: string;
-  category: 'AUDIO' | 'VIDEO' | 'MEETING' | 'TV' | 'NAV';
-  scheme: string;
+  phone: string;
 }
 
-export interface PlayerProfile {
-  appName: string;
-  profileName: string;
+export interface IncomingMessage {
+  id: string;
+  sender: string;
+  content: string;
+  timestamp: number;
+  type: 'WHATSAPP' | 'SMS';
 }
 
 export interface AppSettings {
   userName: string;
   voiceVolume: number;
-  playerProfiles: PlayerProfile[];
+  privacyMode: boolean;
+  messageLimit: 128 | 'full';
+  playerProfiles: { appName: string; profileName: string }[];
 }
 
 export type CarAction = 
@@ -97,4 +84,28 @@ export interface CarStatus {
   isLocked: boolean;
   isUpdating: boolean;
   hazardActive: boolean;
+}
+
+// Added MediaApp interface for dashboard and entertainment apps
+export interface MediaApp {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  category: 'AUDIO' | 'VIDEO';
+  scheme: string;
+}
+
+// Added TrackMetadata for media playback information
+export interface TrackMetadata {
+  title: string;
+  artist: string;
+  isPlaying: boolean;
+  progress: number;
+}
+
+// Added MeetingInfo for calendar and meeting views
+export interface MeetingInfo {
+  title: string;
+  startTime: string;
 }

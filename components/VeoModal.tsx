@@ -21,6 +21,7 @@ const VeoModal: React.FC<VeoModalProps> = ({ isOpen, onClose, onVideoGenerated, 
     try {
       setIsGenerating(true);
       setProgress('Iniciando Veo...');
+      // Guideline: Create new GoogleGenAI instance before API call to use updated key
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       let operation = await ai.models.generateVideos({
         model: 'veo-3.1-fast-generate-preview',
@@ -35,10 +36,17 @@ const VeoModal: React.FC<VeoModalProps> = ({ isOpen, onClose, onVideoGenerated, 
       }
       const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
       if (downloadLink) {
+        // Appending key for download as per guidelines
         onVideoGenerated(`${downloadLink}&key=${process.env.API_KEY}`);
         onClose();
       }
-    } catch (e) { setProgress('Erro na geração.'); }
+    } catch (e: any) { 
+      setProgress('Erro na geração.');
+      // Guideline: Trigger key selection if entity not found
+      if (e?.message?.includes("Requested entity was not found.")) {
+        await window.aistudio.openSelectKey();
+      }
+    }
     finally { setIsGenerating(false); }
   };
 
@@ -65,7 +73,7 @@ const VeoModal: React.FC<VeoModalProps> = ({ isOpen, onClose, onVideoGenerated, 
              onClick={() => fileInputRef.current?.click()}
              className="w-1/2 h-64 bg-white/5 rounded-3xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center cursor-pointer overflow-hidden"
            >
-              {image ? <img src={image} className="w-full h-full object-cover" /> : <span>Carregar Imagem</span>}
+              {image ? <img src={image} className="w-full h-full object-cover" /> : <div className="flex flex-col items-center text-white/40"><i className="fas fa-cloud-upload-alt text-4xl mb-2"></i><span>Carregar Imagem</span></div>}
               <input type="file" ref={fileInputRef} hidden onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) {
@@ -79,7 +87,8 @@ const VeoModal: React.FC<VeoModalProps> = ({ isOpen, onClose, onVideoGenerated, 
               <textarea 
                 value={prompt} 
                 onChange={e => setPrompt(e.target.value)}
-                className="flex-1 bg-black/40 border border-white/10 rounded-2xl p-4 text-white resize-none outline-none focus:border-blue-500"
+                placeholder="Descreva a animação desejada..."
+                className="flex-1 bg-black/40 border border-white/10 rounded-2xl p-4 text-white resize-none outline-none focus:border-blue-500 uppercase italic text-sm font-bold"
               />
               <button 
                 disabled={isGenerating || !image}
@@ -88,6 +97,9 @@ const VeoModal: React.FC<VeoModalProps> = ({ isOpen, onClose, onVideoGenerated, 
               >
                 {isGenerating ? progress : 'Animar EVA'}
               </button>
+              <p className="text-[9px] text-white/30 lowercase italic mt-2">
+                A geração de vídeo requer uma chave API de um projeto com faturamento. <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" className="underline">Saber mais sobre faturamento</a>
+              </p>
            </div>
         </div>
       </div>
