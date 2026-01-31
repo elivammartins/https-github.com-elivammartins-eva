@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { AppSettings, MediaApp } from '../types';
+import { AppSettings, MediaApp, PlayerProfile } from '../types';
 
 interface SettingsMenuProps {
   isOpen: boolean;
@@ -13,19 +13,22 @@ interface SettingsMenuProps {
 const SettingsMenu: React.FC<SettingsMenuProps> = ({ isOpen, onClose, settings, onUpdate, mediaApps }) => {
   if (!isOpen) return null;
 
+  const updateProfile = (appName: string, profileName: string) => {
+    const newProfiles = [...settings.playerProfiles];
+    const idx = newProfiles.findIndex(p => p.appName === appName);
+    if (idx >= 0) {
+      newProfiles[idx].profileName = profileName;
+    } else {
+      newProfiles.push({ appName, profileName });
+    }
+    onUpdate({ ...settings, playerProfiles: newProfiles });
+  };
+
   return (
     <div className="fixed inset-0 z-[10000] flex flex-col items-center justify-center p-6 italic uppercase animate-fade-in">
-      {/* Backdrop de fechamento - Z-INDEX ALTO */}
-      <div 
-        className="fixed inset-0 bg-black/95 backdrop-blur-xl cursor-pointer" 
-        onClick={onClose} 
-      />
+      <div className="fixed inset-0 bg-black/95 backdrop-blur-xl cursor-pointer" onClick={onClose} />
       
-      {/* Container Principal */}
-      <div 
-        className="relative w-full max-w-2xl bg-[#0c0c0e] rounded-[40px] border border-white/10 flex flex-col shadow-2xl overflow-hidden animate-scale-up max-h-[90dvh]"
-        onClick={(e) => e.stopPropagation()} // Impede o clique interno de fechar o modal
-      >
+      <div className="relative w-full max-w-2xl bg-[#0c0c0e] rounded-[40px] border border-white/10 flex flex-col shadow-2xl overflow-hidden animate-scale-up max-h-[90dvh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-8 border-b border-white/5 flex justify-between items-center bg-gradient-to-r from-blue-900/10 to-transparent shrink-0">
           <h2 className="text-2xl font-black tracking-tighter text-white">Configurações Pandora</h2>
           <button onClick={onClose} className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl text-white border border-white/5">
@@ -44,6 +47,22 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ isOpen, onClose, settings, 
              />
           </div>
 
+          <div className="space-y-4">
+            <label className="text-[10px] font-black text-blue-400 tracking-widest uppercase">Perfis de Streaming</label>
+            {['Netflix', 'Globoplay', 'Disney+'].map(app => (
+              <div key={app} className="flex gap-4 items-center bg-white/5 p-4 rounded-2xl border border-white/5">
+                <span className="w-24 text-xs font-bold text-white/60">{app}</span>
+                <input 
+                  type="text"
+                  placeholder="Nome do Perfil"
+                  value={settings.playerProfiles.find(p => p.appName === app)?.profileName || ''}
+                  onChange={(e) => updateProfile(app, e.target.value)}
+                  className="flex-1 h-10 bg-black/40 border border-white/10 rounded-xl px-4 text-sm font-bold outline-none focus:border-blue-500 text-white"
+                />
+              </div>
+            ))}
+          </div>
+
           <div className="flex flex-col gap-6">
              <label className="text-[10px] font-black text-blue-400 tracking-widest uppercase">Volume do Sistema</label>
              <div className="p-4 bg-white/5 rounded-2xl border border-white/5 flex flex-col gap-3">
@@ -57,7 +76,7 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ isOpen, onClose, settings, 
           </div>
           
           <div className="p-4 bg-blue-600/10 rounded-2xl border border-blue-500/20 text-center">
-             <p className="text-[8px] font-black text-blue-400 tracking-widest uppercase">Pandora Core V44 Alpha</p>
+             <p className="text-[8px] font-black text-blue-400 tracking-widest uppercase">Pandora Core V110 Stable</p>
           </div>
         </div>
 

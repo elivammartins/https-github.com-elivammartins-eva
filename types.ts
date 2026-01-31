@@ -61,17 +61,24 @@ export interface MediaApp {
   scheme: string;
 }
 
+export interface PlayerProfile {
+  appName: string;
+  profileName: string;
+  pin?: string;
+}
+
+export interface AppSettings {
+  userName: string;
+  voiceVolume: number;
+  playerProfiles: PlayerProfile[];
+}
+
 export interface StopRecommendation {
   name: string;
   type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'OTHER';
   distance: string;
   rating: number;
   coords?: [number, number];
-}
-
-export interface AppSettings {
-  userName: string;
-  voiceVolume: number;
 }
 
 export interface MeetingInfo {
