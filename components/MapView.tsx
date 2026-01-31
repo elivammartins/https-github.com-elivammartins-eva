@@ -81,11 +81,11 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
             onRouteUpdate(steps, route.duration, route.distance);
           }
         }
-      } catch (e) { console.error("OSRM Error:", e); }
+      } catch (e) { console.error("OSRM Engine Error:", e); }
     };
 
     fetchRoute();
-  }, [travel.destinationCoords]);
+  }, [travel.destinationCoords, travel.destination]);
 
   return <div ref={mapContainerRef} className="w-full h-full bg-[#0c0c0e] animate-fade-in" />;
 };
