@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
-import { TravelInfo, MediaApp, AppSettings, LayoutMode, TrackMetadata } from './types';
+import { TravelInfo, MediaApp, TrackMetadata } from './types';
 import Avatar from './components/Avatar';
 import NavigationPanel from './components/NavigationPanel';
 import MapView from './components/MapView';
@@ -10,16 +10,10 @@ import VeoModal from './components/VeoModal';
 import MiniPlayer from './components/MiniPlayer';
 import { decode, decodeAudioData, createBlob } from './utils/audio';
 
-// Safe guard para garantir que process.env não quebre o runtime
-if (typeof window !== 'undefined' && !(window as any).process) {
-  (window as any).process = { env: {} };
-}
-
 const MEDIA_APPS: MediaApp[] = [
   { id: 'nav', name: 'Navegação', icon: 'fas fa-location-arrow', color: 'text-emerald-400', category: 'NAV' },
-  { id: 'v2v', name: 'Telemetria', icon: 'fas fa-satellite-dish', color: 'text-blue-400', category: 'METRICS' },
   { id: 'spotify', name: 'Spotify', icon: 'fab fa-spotify', color: 'text-[#1DB954]', category: 'AUDIO' },
-  { id: 'engine', name: 'Diagnóstico', icon: 'fas fa-microchip', color: 'text-orange-500', category: 'METRICS' },
+  { id: 'engine', name: 'Status', icon: 'fas fa-microchip', color: 'text-orange-500', category: 'METRICS' },
 ];
 
 const App: React.FC = () => {
@@ -34,8 +28,7 @@ const App: React.FC = () => {
   const [currentPos, setCurrentPos] = useState<[number, number]>([-23.5505, -46.6333]);
   const [activeApp, setActiveApp] = useState<string>('nav');
   const [apiErrorMessage, setApiErrorMessage] = useState<string | null>(null);
-  const [isStandalone, setIsStandalone] = useState(true);
-  
+
   const [track] = useState<TrackMetadata>({
     title: 'AGUARDANDO MÍDIA', artist: 'PANDORA SYNC...', isPlaying: false, progress: 0, duration: 180
   });
@@ -53,10 +46,6 @@ const App: React.FC = () => {
   const inputCtxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  useEffect(() => {
-    setIsStandalone(!(window as any).aistudio);
-  }, []);
-
   const cleanupAudioResources = async () => {
     if (sessionRef.current) { try { sessionRef.current.close(); } catch(e) {} sessionRef.current = null; }
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
@@ -72,19 +61,16 @@ const App: React.FC = () => {
   const startVoiceSession = async () => {
     setApiErrorMessage(null);
     try {
-      // Tenta obter a chave do ambiente de forma segura
-      const apiKey = (process.env as any).API_KEY || (import.meta as any).env?.VITE_API_KEY;
+      const apiKey = process.env.API_KEY;
       
-      if (!apiKey || apiKey === 'undefined' || apiKey === '' || apiKey.includes('process.env')) {
-        setStatusLog('CHAVE AUSENTE');
-        setApiErrorMessage(isStandalone 
-          ? "ERRO DE BUILD: O Vercel não encontrou a 'API_KEY'. Adicione-a nas Settings e CLIQUE EM REDEPLOY na aba Deployments." 
-          : "ERRO GOOGLE: Clique em 'Select Project' no topo do AI Studio.");
+      if (!apiKey || apiKey === 'undefined' || apiKey === '') {
+        setApiErrorMessage("ERRO: API_KEY não detectada. Verifique as variáveis de ambiente no Vercel e faça um REDEPLOY.");
         return;
       }
 
-      setStatusLog('SINCRONIZANDO...');
+      setStatusLog('CONECTANDO...');
       await cleanupAudioResources();
+      
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
@@ -92,7 +78,7 @@ const App: React.FC = () => {
       outputCtxRef.current = new AudioContextClass({ sampleRate: 24000 });
       inputCtxRef.current = new AudioContextClass({ sampleRate: 16000 });
 
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
@@ -134,34 +120,24 @@ const App: React.FC = () => {
             }
           },
           onerror: (e: any) => { 
-            setApiErrorMessage(`API ERROR: ${e.message}`);
-            setStatusLog('ERRO CONEXÃO');
+            setApiErrorMessage(`ERRO API: ${e.message}`);
             cleanupAudioResources();
           },
-          onclose: () => { setStatusLog('PANDORA: PRONTA'); cleanupAudioResources(); },
+          onclose: () => { 
+            setStatusLog('PANDORA: PRONTA'); 
+            cleanupAudioResources(); 
+          },
         },
         config: {
           responseModalities: [Modality.AUDIO],
-          tools: [{ googleMaps: {} }],
-          systemInstruction: 'Você é a EVA. Assistente Pandora para Android Auto. Responda curto e direto em PT-BR.'
+          systemInstruction: 'Você é a EVA, assistente veicular inteligente da Pandora. Responda de forma curta e prestativa em Português Brasileiro.'
         }
       });
       sessionRef.current = await sessionPromise;
     } catch (err: any) { 
-      setApiErrorMessage(`HARDWARE: ${err.message}`);
-      setStatusLog('ERRO MICROFONE');
+      setApiErrorMessage(`ERRO HARDWARE: ${err.message}`);
       cleanupAudioResources();
     }
-  };
-
-  const handleAction = async () => {
-    if (isListening) { await cleanupAudioResources(); setStatusLog('PANDORA: PRONTA'); return; }
-    const aistudio = (window as any).aistudio;
-    if (aistudio && !(await aistudio.hasSelectedApiKey())) {
-      await aistudio.openSelectKey();
-      return;
-    }
-    startVoiceSession();
   };
 
   useEffect(() => {
@@ -179,106 +155,113 @@ const App: React.FC = () => {
 
   return (
     <div className="h-full w-full bg-black text-white flex flex-col overflow-hidden relative font-sans italic select-none">
-      <div className={`absolute inset-0 transition-opacity duration-700 ${activeApp === 'nav' ? 'opacity-100' : 'opacity-10 scale-105 blur-sm'}`}>
+      
+      {/* Background Mapa */}
+      <div className={`absolute inset-0 transition-opacity duration-1000 ${activeApp === 'nav' ? 'opacity-100' : 'opacity-20 blur-sm'}`}>
         <MapView travel={travel} currentPosition={currentPos} viewMode="2D" onSetDestination={() => {}} />
       </div>
 
-      <header className="h-[60px] bg-black/80 backdrop-blur-md border-b border-white/5 flex items-center px-6 gap-4 z-[500] shrink-0">
+      {/* Header HUD */}
+      <header className="h-[60px] bg-black/80 backdrop-blur-lg border-b border-white/5 flex items-center px-6 gap-4 z-[50] shrink-0">
         <div className="flex items-center gap-3 pr-4 border-r border-white/10 shrink-0">
            <div className={`w-2 h-2 rounded-full ${gpsLocked ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-red-600 animate-pulse'}`}></div>
-           <span className="text-[9px] font-black uppercase tracking-widest text-white/50 italic">PANDORA CORE V67</span>
+           <span className="text-[10px] font-black uppercase tracking-widest text-white/50">PANDORA V67</span>
         </div>
         <div className="flex gap-2 overflow-x-auto no-scrollbar flex-1 items-center">
           {MEDIA_APPS.map(app => (
-            <button key={app.id} onClick={() => setActiveApp(app.id)} className={`h-10 px-4 shrink-0 rounded-xl border flex items-center gap-2 transition-all ${activeApp === app.id ? 'bg-blue-600/20 border-blue-500/50 text-blue-400' : 'bg-white/5 border-white/10 text-white/40 opacity-50'}`}>
-              <i className={`${app.icon} text-sm`}></i>
-              <span className="text-[9px] font-black uppercase tracking-widest">{app.name}</span>
+            <button key={app.id} onClick={() => setActiveApp(app.id)} className={`h-10 px-4 shrink-0 rounded-xl border flex items-center gap-2 transition-all ${activeApp === app.id ? 'bg-blue-600/30 border-blue-500 text-blue-400' : 'bg-white/5 border-white/5 text-white/30'}`}>
+              <i className={`${app.icon} text-xs`}></i>
+              <span className="text-[9px] font-black uppercase">{app.name}</span>
             </button>
           ))}
         </div>
       </header>
 
-      <main className="flex-1 relative z-10 pointer-events-none p-6 flex flex-col items-center justify-between overflow-hidden">
+      {/* Main Focus Area */}
+      <main className="flex-1 relative z-10 p-6 flex flex-col items-center justify-between pointer-events-none">
+        
+        {/* Velocímetro */}
         <div className="w-full flex justify-start pointer-events-auto">
-          <div className="bg-black/90 backdrop-blur-3xl p-6 rounded-[40px] border border-white/10 shadow-2xl flex flex-col items-center min-w-[120px]">
-              <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-1">KM/H</span>
+          <div className="bg-black/90 backdrop-blur-2xl p-6 rounded-[40px] border border-white/10 shadow-2xl flex flex-col items-center">
+              <span className="text-[10px] font-black text-blue-500 uppercase mb-1">KM/H</span>
               <span className="text-6xl font-black leading-none italic tracking-tighter">{currentSpeed}</span>
           </div>
         </div>
 
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-20">
-            <div onClick={handleAction} className={`relative w-48 h-48 lg:w-64 lg:h-64 rounded-full flex items-center justify-center transition-all duration-500 cursor-pointer ${isListening ? 'scale-110' : 'scale-100'}`}>
+        {/* EVA Avatar - O centro de comando */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-auto">
+            <div 
+              onClick={() => isListening ? cleanupAudioResources() : startVoiceSession()}
+              className={`relative w-56 h-56 lg:w-72 lg:h-72 rounded-full flex items-center justify-center transition-all duration-500 cursor-pointer ${isListening ? 'scale-110' : 'scale-100 hover:scale-105'}`}
+            >
                <div className={`absolute inset-0 rounded-full border-4 border-blue-500/20 animate-ping-slow ${isListening || isSpeaking ? 'opacity-100' : 'opacity-0'}`}></div>
-               <div className={`absolute -inset-4 rounded-full bg-blue-500/10 blur-3xl transition-opacity duration-500 ${isListening || isSpeaking ? 'opacity-100' : 'opacity-0'}`}></div>
-               <div className="w-full h-full rounded-full border-2 border-white/10 overflow-hidden shadow-[0_0_60px_rgba(37,99,235,0.2)] bg-black relative">
+               <div className="w-full h-full rounded-full border-2 border-white/10 overflow-hidden shadow-[0_0_80px_rgba(37,99,235,0.2)] bg-black relative">
                   <Avatar isListening={isListening} isSpeaking={isSpeaking} videoUrl={veoVideoUrl} onAnimateClick={() => {}} />
-                  <div className={`absolute bottom-6 left-0 right-0 flex justify-center transition-opacity ${isListening ? 'opacity-100' : 'opacity-0'}`}>
-                     <div className="flex gap-1 h-4 items-end">
-                        {[1,2,3,4,5].map(i => (
-                          <div key={i} className="w-1 bg-white rounded-full animate-audio-bar" style={{ animationDelay: `${i*0.1}s`, height: `${20 + Math.random()*80}%` }}></div>
-                        ))}
-                     </div>
-                  </div>
+                  {isListening && (
+                    <div className="absolute bottom-8 left-0 right-0 flex justify-center gap-1 h-6 items-end">
+                       {[1,2,3,4,5].map(i => (
+                         <div key={i} className="w-1 bg-white rounded-full animate-wave" style={{ animationDelay: `${i*0.1}s` }}></div>
+                       ))}
+                    </div>
+                  )}
                </div>
-               <div className={`absolute -bottom-4 bg-white text-black px-6 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-2xl transition-all ${isListening ? 'bg-red-600 text-white animate-pulse' : 'bg-white'}`}>
+               <div className={`absolute -bottom-4 bg-white text-black px-6 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-2xl transition-all ${isListening ? 'bg-red-600 text-white animate-pulse' : ''}`}>
                   {statusLog}
                </div>
             </div>
         </div>
 
+        {/* Navigation Info */}
         {activeApp === 'nav' && (
-          <div className="w-full max-w-[360px] pointer-events-auto self-end z-20">
+          <div className="w-full max-w-[340px] pointer-events-auto self-end">
              <NavigationPanel travel={travel} onAddStop={() => setIsAddStopModalOpen(true)} onSetDestination={() => setIsAddStopModalOpen(true)} onRemoveStop={() => {}} transparent />
           </div>
         )}
       </main>
 
-      <footer className="h-[110px] bg-black border-t border-white/5 px-8 flex items-center justify-between z-[500] pointer-events-auto shrink-0 relative">
-         <div className="flex-1 max-w-[320px]">
-            <MiniPlayer app={MEDIA_APPS[2]} metadata={track} onControl={() => {}} onExpand={() => setActiveApp('spotify')} transparent />
+      {/* Player Footer */}
+      <footer className="h-[100px] bg-black border-t border-white/5 px-8 flex items-center justify-between z-[50] shrink-0">
+         <div className="flex-1 max-w-[300px]">
+            <MiniPlayer app={MEDIA_APPS[1]} metadata={track} onControl={() => {}} onExpand={() => setActiveApp('spotify')} transparent />
          </div>
          <div className="flex items-center gap-4">
-            <button onClick={() => setIsVeoModalOpen(true)} className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-xl opacity-40 hover:opacity-100 transition-opacity">
+            <button onClick={() => setIsVeoModalOpen(true)} className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-xl opacity-50 hover:opacity-100 transition-opacity">
                <i className="fas fa-video"></i>
             </button>
-            <button onClick={() => setIsAddStopModalOpen(true)} className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-xl opacity-40 hover:opacity-100 transition-opacity">
+            <button onClick={() => setIsAddStopModalOpen(true)} className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-xl opacity-50 hover:opacity-100 transition-opacity">
                <i className="fas fa-map-pin"></i>
             </button>
          </div>
       </footer>
 
+      {/* Error Overlay */}
       {apiErrorMessage && (
-        <div className="fixed inset-0 z-[2000] bg-black/80 backdrop-blur-xl flex items-center justify-center p-6 animate-fade-in pointer-events-auto">
-          <div className="bg-red-600 w-full max-w-lg p-8 rounded-[50px] shadow-[0_0_100px_rgba(220,38,38,0.5)] border border-white/20 flex flex-col gap-6 text-center">
-             <i className="fas fa-exclamation-triangle text-5xl text-white mb-2"></i>
-             <h2 className="text-2xl font-black uppercase italic tracking-tighter text-white">Falha de Deploy</h2>
-             <div className="bg-black/20 p-5 rounded-3xl border border-white/10">
-                <p className="text-xs font-bold leading-relaxed uppercase italic text-white/90">{apiErrorMessage}</p>
-             </div>
-             <div className="flex flex-col gap-3">
-                <button onClick={() => window.location.reload()} className="h-16 bg-white text-red-600 rounded-2xl font-black uppercase text-xs shadow-xl active:scale-95 transition-all">Tentar Reconectar</button>
-                <button onClick={() => setApiErrorMessage(null)} className="h-14 bg-black/20 text-white/60 rounded-2xl font-black uppercase text-[10px]">Fechar Diagnóstico</button>
-             </div>
+        <div className="fixed inset-0 z-[1000] bg-black/90 backdrop-blur-xl flex items-center justify-center p-8 text-center animate-fade-in">
+          <div className="max-w-md flex flex-col gap-6">
+             <i className="fas fa-exclamation-triangle text-5xl text-red-600"></i>
+             <h2 className="text-2xl font-black uppercase italic">Falha no Sistema</h2>
+             <p className="text-xs font-bold text-white/60 uppercase italic tracking-widest leading-relaxed">{apiErrorMessage}</p>
+             <button onClick={() => window.location.reload()} className="h-16 bg-white text-black rounded-2xl font-black uppercase text-xs active:scale-95 transition-all">Recarregar Core</button>
+             <button onClick={() => setApiErrorMessage(null)} className="text-[10px] font-black text-white/30 uppercase underline">Fechar e Ignorar</button>
           </div>
         </div>
       )}
 
       <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(n, la, ln) => {
           setTravel(p => ({ ...p, destination: n.toUpperCase(), destinationCoords: [la, ln] }));
-          setStatusLog('ROTA DEFINIDA');
-          setActiveApp('nav');
           setIsAddStopModalOpen(false);
+          setActiveApp('nav');
       }} />
       <VeoModal isOpen={isVeoModalOpen} onClose={() => setIsVeoModalOpen(false)} onVideoGenerated={setVeoVideoUrl} />
 
       <style>{`
-        @keyframes ping-slow { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.5); opacity: 0; } }
-        @keyframes audio-bar { 0%, 100% { height: 20%; } 50% { height: 100%; } }
-        .animate-ping-slow { animation: ping-slow 2s cubic-bezier(0, 0, 0.2, 1) infinite; }
-        .animate-audio-bar { animation: audio-bar 0.4s ease-in-out infinite; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
+        @keyframes ping-slow { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(1.6); opacity: 0; } }
+        @keyframes wave { 0%, 100% { height: 20%; } 50% { height: 100%; } }
         @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+        .animate-ping-slow { animation: ping-slow 2s cubic-bezier(0, 0, 0.2, 1) infinite; }
+        .animate-wave { animation: wave 0.5s ease-in-out infinite; }
         .animate-fade-in { animation: fade-in 0.3s ease-out; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
       `}</style>
     </div>
   );
