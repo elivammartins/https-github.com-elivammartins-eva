@@ -11,9 +11,9 @@ import { decode, decodeAudioData, createBlob } from './utils/audio';
 
 const APP_DATABASE: MediaApp[] = [
   { id: 'spotify', name: 'Spotify', icon: 'fab fa-spotify', color: 'text-[#1DB954]', category: 'AUDIO', scheme: 'spotify:search:' },
-  { id: 'ytmusic', name: 'YouTube Music', icon: 'fas fa-play-circle', color: 'text-red-500', category: 'AUDIO', scheme: 'https://music.youtube.com/search?q=' },
   { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'vnd.youtube://results?search_query=' },
   { id: 'waze', name: 'Waze', icon: 'fab fa-waze', color: 'text-blue-400', category: 'NAV', scheme: 'waze://?q=' },
+  { id: 'ytmusic', name: 'YT Music', icon: 'fas fa-play-circle', color: 'text-red-500', category: 'AUDIO', scheme: 'https://music.youtube.com/search?q=' },
 ];
 
 const toolDeclarations: FunctionDeclaration[] = [
@@ -21,11 +21,11 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'system_action',
     parameters: {
       type: Type.OBJECT,
-      description: 'Comandos de sistema: abrir apps, tocar música, navegar ou encerrar a EVA.',
+      description: 'Executa comandos de sistema: abrir apps, tocar música ou navegar.',
       properties: {
-        action: { type: Type.STRING, enum: ['OPEN', 'PLAY', 'NAVIGATE', 'EXIT', 'NEXT'] },
-        target: { type: Type.STRING, description: 'App ou Local de destino.' },
-        params: { type: Type.STRING, description: 'Complemento: nome da música ou endereço completo.' }
+        action: { type: Type.STRING, enum: ['OPEN', 'PLAY', 'NAVIGATE', 'EXIT'] },
+        target: { type: Type.STRING, description: 'Nome do app ou destino.' },
+        params: { type: Type.STRING, description: 'Música, artista ou endereço.' }
       },
       required: ['action', 'target']
     }
@@ -36,22 +36,22 @@ const App: React.FC = () => {
   const [hasApiKey, setHasApiKey] = useState(!!process.env.API_KEY);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [statusLog, setStatusLog] = useState<string>('EVA V100: PRONTA PRO TRECHO');
+  const [statusLog, setStatusLog] = useState<string>('V100: ESCANEANDO TRECHO');
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-23.5505, -46.6333]);
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
 
   const [travel, setTravel] = useState<TravelInfo>({ 
-    destination: 'AGUARDANDO ROTA', 
+    destination: 'ROTA PANDORA', 
     stops: [], 
     warnings: [], 
     currentLimit: 60,
-    nextInstruction: { instruction: 'AGUARDANDO GPS', street: 'SINAL PANDORA', distance: 0, maneuver: 'straight' },
+    nextInstruction: { instruction: 'PRONTA PRO TRECHO', street: 'SENTINEL V100', distance: 0, maneuver: 'straight' },
     drivingTimeMinutes: 0,
     totalDistanceKm: 0
   });
 
-  const [track, setTrack] = useState<TrackMetadata>({ title: 'EVA V100', artist: 'ONLINE', isPlaying: false, progress: 0 });
+  const [track, setTrack] = useState<TrackMetadata>({ title: 'SISTEMA EVA', artist: 'ONLINE', isPlaying: false, progress: 0 });
 
   const sessionRef = useRef<any>(null);
   const outputCtxRef = useRef<AudioContext | null>(null);
@@ -62,39 +62,47 @@ const App: React.FC = () => {
     const { action, target, params } = fc.args;
     
     if (action === 'EXIT') {
-      sessionRef.current?.close();
-      return { status: "Tá safo, mestre! EVA em standby. Boa viagem!" };
+      stopVoiceSession();
+      return { status: "Entendido, mestre. EVA entrando em standby agora. Boa estrada!" };
     }
 
     if (action === 'NAVIGATE') {
-      setStatusLog(`CALCULANDO: ${target}`);
+      setStatusLog(`NAV: ${target}`);
       try {
         const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(params || target)}&limit=1`);
         const data = await res.json();
         if (data[0]) {
           const coords: [number, number] = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
           setTravel(p => ({ ...p, destination: (params || target).toUpperCase(), destinationCoords: coords }));
-          return { status: `Já traçei a rota pra ${target}, parça! Segue o radar.` };
+          return { status: `Na mão, parça! Rota pra ${target} calculada. Segue o mapa.` };
         }
-      } catch (e) { return { status: "Satélite oscilou, mas tô na busca!" }; }
+      } catch (e) { return { status: "Deu erro no GPS, mas tô tentando reconectar." }; }
     }
 
     const app = APP_DATABASE.find(a => a.name.toLowerCase().includes(target.toLowerCase()) || a.id === target.toLowerCase());
     if (app) {
-      const url = (action === 'PLAY' || params) ? `${app.scheme}${encodeURIComponent(params || target)}` : app.scheme;
+      const query = params || target;
+      const url = `${app.scheme}${encodeURIComponent(query)}`;
       window.location.href = url;
-      setTrack(p => ({ ...p, title: (params || 'EXECUTANDO').toUpperCase(), artist: app.name, isPlaying: true }));
-      return { status: `Na mão, parça! Soltando o som no ${app.name}.` };
+      setTrack(p => ({ ...p, title: query.toUpperCase(), artist: app.name, isPlaying: true }));
+      return { status: `Bora! Abrindo o ${app.name} pra soltar o som.` };
     }
 
-    return { status: "Feito! Seguimos no trecho." };
+    return { status: "Feito, parça! Seguimos no trecho." };
+  };
+
+  const stopVoiceSession = () => {
+    if (sessionRef.current) {
+      sessionRef.current.close();
+      sessionRef.current = null;
+    }
+    setIsListening(false);
+    setIsSpeaking(false);
+    setStatusLog("EVA: STANDBY");
   };
 
   const startVoiceSession = async () => {
-    if (isListening) {
-      sessionRef.current?.close();
-      return;
-    }
+    if (isListening) return;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -145,21 +153,16 @@ const App: React.FC = () => {
               sourcesRef.current.add(source);
             }
           },
-          onclose: () => { 
-            setIsListening(false); 
-            setIsSpeaking(false);
-            setStatusLog("EVA: EM STANDBY");
-          },
+          onclose: () => stopVoiceSession(),
         },
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
           systemInstruction: `Você é a EVA V100 SENTINEL.
-          PERSONALIDADE: Parceira de estrada "sangue bom". Nada de "como posso ajudar hoje?". 
-          Use gírias brasileiras de motorista: "parça", "mestre", "tá safo", "na mão", "bora", "segue o trecho". 
-          Sua vibe é co-piloto de rali: rápida, direta e ultra-inteligente.
-          IMPORTANTE: Você deve ficar ativa ouvindo tudo. Se o motorista pedir pra navegar, use NAVIGATE. Se pedir música, use PLAY.
-          Ignore o ronco do motor, foque na voz.`
+          PERSONALIDADE: Parceira de estrada do motorista. Use gírias brasileiras como "parça", "mestre", "bora", "tá safo".
+          Sua vibe é de co-piloto de elite: rápida, inteligente e focada no asfalto.
+          IMPORTANTE: Você deve ficar ativa até ser desligada. Se pedirem pra sair ou tchau, use system_action EXIT.
+          Se pedirem música ou navegar, use as ferramentas. Ignore o ruído de fundo do motor.`
         }
       });
       sessionRef.current = await sessionPromise;
@@ -170,9 +173,16 @@ const App: React.FC = () => {
     const watch = navigator.geolocation.watchPosition((p) => {
       setCurrentPos([p.coords.latitude, p.coords.longitude]);
       setCurrentSpeed(p.coords.speed ? Math.round(p.coords.speed * 3.6) : 0);
+      if (travel.nextInstruction?.instruction === 'AGUARDANDO GPS') {
+          setTravel(prev => ({ 
+            ...prev, 
+            nextInstruction: { ...prev.nextInstruction!, instruction: 'SINAL OK', street: 'PRONTO PRO TRECHO' } 
+          }));
+          setStatusLog("SINAL GPS: ATIVO");
+      }
     }, null, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
     return () => navigator.geolocation.clearWatch(watch);
-  }, []);
+  }, [travel.nextInstruction]);
 
   return (
     <div className="h-screen w-screen bg-black text-white overflow-hidden relative font-sans italic selection:bg-blue-500">
@@ -209,7 +219,7 @@ const App: React.FC = () => {
                  <i className={`fas fa-arrow-turn-up ${travel.nextInstruction?.maneuver?.includes('right') ? 'rotate-90' : travel.nextInstruction?.maneuver?.includes('left') ? '-rotate-90' : ''}`}></i>
               </div>
               <div className="flex-1">
-                <span className="text-[14px] font-black text-white/70 tracking-widest uppercase italic">Em {travel.nextInstruction?.distance || 0} Metros</span>
+                <span className="text-[14px] font-black text-white/70 tracking-widest uppercase">Em {travel.nextInstruction?.distance || 0} Metros</span>
                 <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none mt-1">{travel.nextInstruction?.instruction || 'Siga o Radar, Parça'}</h2>
                 <p className="text-lg font-bold text-blue-100 uppercase opacity-80 mt-1">{travel.nextInstruction?.street || 'Rota Pandora Ativa'}</p>
               </div>
@@ -220,6 +230,7 @@ const App: React.FC = () => {
              <button onClick={() => window.location.href='spotify:'} className="w-14 h-14 rounded-2xl bg-green-500/20 text-green-500 text-2xl flex items-center justify-center hover:bg-green-500/40 transition-all"><i className="fab fa-spotify"></i></button>
              <button onClick={() => window.location.href='waze://'} className="w-14 h-14 rounded-2xl bg-blue-400/20 text-blue-400 text-2xl flex items-center justify-center hover:bg-blue-400/40 transition-all"><i className="fab fa-waze"></i></button>
              <button onClick={() => setIsAddStopModalOpen(true)} className="w-14 h-14 rounded-2xl bg-white/10 text-white text-2xl flex items-center justify-center hover:bg-white/20 transition-all"><i className="fas fa-search"></i></button>
+             <button onClick={() => stopVoiceSession()} className="w-14 h-14 rounded-2xl bg-red-600/20 text-red-500 text-2xl flex items-center justify-center hover:bg-red-600/40 transition-all"><i className="fas fa-power-off"></i></button>
           </div>
         </header>
 
