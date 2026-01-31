@@ -3,52 +3,54 @@ export interface LocationData {
   latitude: number;
   longitude: number;
   speed: number;
-  leadVehicleSpeed: number;
-  distanceToLead: number;
   heading: number | null;
 }
 
 export type WarningType = 'RADAR' | 'ACCIDENT' | 'HAZARD' | 'POLICE' | 'TRAFFIC';
-export type WarningSource = 'WAZE' | 'RADARBOT' | 'GOOGLE_MAPS';
 
 export interface RouteWarning {
+  id: string;
   type: WarningType;
-  count: number;
-  source?: WarningSource;
-}
-
-export interface TurnByTurnInstruction {
-  instruction: string;
-  distance: string;
-  icon: string;
+  distance: number; // em metros
+  description: string;
+  coords: [number, number];
 }
 
 export interface StopInfo {
   name: string;
-  timeToReach: number; 
-  distance: string; 
-  coords?: [number, number]; 
-  warnings?: RouteWarning[]; 
+  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE';
+  coords: [number, number];
 }
 
+// Added StopRecommendation to resolve error in RecommendationCard.tsx
 export interface StopRecommendation {
   name: string;
-  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'OTHER';
+  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE';
   distance: string;
   rating: number;
-  coords: [number, number];
+}
+
+// Added AppSettings to resolve error in SettingsMenu.tsx
+export interface AppSettings {
+  userName: string;
+  voiceVolume: number;
+}
+
+// Added MeetingInfo to resolve error in MeetingView.tsx
+export interface MeetingInfo {
+  title: string;
+  startTime: string;
+  id?: string;
 }
 
 export interface TravelInfo {
   destination: string;
   destinationCoords?: [number, number];
-  eta: string;
-  distanceRemaining: string;
-  drivingTimeMinutes: number;
-  elapsedTimeMinutes: number;
   stops: StopInfo[];
-  isRerouting?: boolean;
-  nextInstruction?: TurnByTurnInstruction;
+  nextInstruction?: { instruction: string; distance: string; icon: string };
+  warnings: RouteWarning[];
+  // Added drivingTimeMinutes to resolve property access in Dashboard.tsx
+  drivingTimeMinutes?: number;
 }
 
 export interface TrackMetadata {
@@ -56,49 +58,18 @@ export interface TrackMetadata {
   artist: string;
   isPlaying: boolean;
   progress: number;
-  duration: number;
 }
-
-export interface MeetingInfo {
-  id: string;
-  title: string;
-  startTime: string;
-  endTime: string;
-  status: 'SCHEDULED' | 'CANCELED' | 'IN_PROGRESS';
-  organizer: string;
-  app: 'teams' | 'meet' | 'zoom';
-}
-
-export enum LayoutMode {
-  STANDARD = 'STANDARD',
-  FULL_MAP = 'FULL_MAP',
-  MAXIMIZED_WIDGET = 'MAXIMIZED_WIDGET',
-  EVA_FOCUS = 'EVA_FOCUS'
-}
-
-export type ColumnSide = 'LEFT' | 'RIGHT';
 
 export interface MediaApp {
   id: string;
   name: string;
   icon: string;
   color: string;
-  category: 'AUDIO' | 'VIDEO' | 'MEETING' | 'METRICS' | 'NAV' | 'WEATHER';
+  category: 'AUDIO' | 'VIDEO' | 'NAV' | 'METRICS';
 }
 
-export interface AppSettings {
-  layoutMode: LayoutMode;
-  columnASide: ColumnSide;
-  mapStyle: '2D' | '3D' | 'SATELLITE';
-  pinnedAppSlot1: string; 
-  pinnedAppSlot2: string; 
-  enabledAppIds: string[]; 
-  v2vThreshold: number;
-  v2vDistance: number; // Nova propriedade para definir distância alvo
-  v2vWarningEnabled: boolean;
-  voiceVolume: number;
-  outlookAccount: string;
-  userName: string;
-  showTurnByTurn: boolean;
-  audioPlayerMode: 'MINI' | 'FULL';
+export enum LayoutMode {
+  HUD = 'HUD',
+  FULL_MAP = 'FULL_MAP',
+  VIDEO_FOCUS = 'VIDEO_FOCUS'
 }
