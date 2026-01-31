@@ -18,6 +18,7 @@ const APP_DATABASE: MediaApp[] = [
   { id: 'netflix', name: 'Netflix', icon: 'fas fa-film', color: 'text-red-700', category: 'VIDEO', scheme: 'https://www.netflix.com/search?q=' },
   { id: 'globoplay', name: 'Globoplay', icon: 'fas fa-play', color: 'text-white', category: 'VIDEO', scheme: 'https://globoplay.globo.com/busca/?q=' },
   { id: 'max', name: 'Max', icon: 'fas fa-star', color: 'text-blue-600', category: 'VIDEO', scheme: 'https://www.max.com/search/' },
+  { id: 'disney', name: 'Disney+', icon: 'fas fa-plus-circle', color: 'text-blue-400', category: 'VIDEO', scheme: 'https://www.disneyplus.com/search?q=' },
   { id: 'waze', name: 'Waze', icon: 'fab fa-waze', color: 'text-[#33CCFF]', category: 'NAV', scheme: 'waze://?q=' },
 ];
 
@@ -29,8 +30,8 @@ const toolDeclarations: FunctionDeclaration[] = [
       description: 'Executa comandos de sistema no Android Auto.',
       properties: {
         action: { type: Type.STRING, enum: ['OPEN', 'PLAY', 'NAVIGATE', 'MINIMIZE', 'MAXIMIZE', 'CLOSE_MEDIA', 'EXIT'] },
-        target: { type: Type.STRING, description: 'App alvo (netflix, youtube, globoplay, max, etc).' },
-        params: { type: Type.STRING, description: 'STRING DE BUSCA TÉCNICA: O Nome oficial e completo da obra/episódio conforme consta no catálogo original do streaming.' }
+        target: { type: Type.STRING, description: 'App alvo (netflix, youtube, globoplay, max, spotify, etc).' },
+        params: { type: Type.STRING, description: 'STRING DE BUSCA TÉCNICA: O Nome oficial do episódio/obra resolvido internamente.' }
       },
       required: ['action', 'target']
     }
@@ -65,40 +66,51 @@ const App: React.FC = () => {
 
   const handleSystemAction = async (fc: any) => {
     const { action, target, params } = fc.args;
-    let finalQuery = params || target || "";
+    let finalQuery = params || "";
 
-    if (action === 'EXIT') { setIsSystemBooted(false); stopVoiceSession(); return { status: "Saindo." }; }
-    if (action === 'MINIMIZE') { setMediaState('PIP'); return { status: "Minimizado." }; }
-    if (action === 'MAXIMIZE') { setMediaState('FULL'); return { status: "Expandido." }; }
+    if (action === 'EXIT') { setIsSystemBooted(false); stopVoiceSession(); return { status: "Offline." }; }
+    if (action === 'MINIMIZE') { setMediaState('PIP'); return { status: "Modo PIP." }; }
+    if (action === 'MAXIMIZE') { setMediaState('FULL'); return { status: "Full Screen." }; }
 
     if (action === 'NAVIGATE') {
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(finalQuery)}&limit=1`);
+        const query = finalQuery || target;
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
         const data = await res.json();
         if (data[0]) {
           const coords: [number, number] = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-          setTravel(p => ({ ...p, destination: finalQuery.toUpperCase(), destinationCoords: coords }));
-          window.open(`waze://?q=${encodeURIComponent(finalQuery)}&navigate=yes`, '_system');
-          return { status: `GPS: ${finalQuery}.` };
+          setTravel(p => ({ ...p, destination: query.toUpperCase(), destinationCoords: coords }));
+          window.location.href = `waze://?q=${encodeURIComponent(query)}&navigate=yes`;
+          return { status: `GPS: ${query}.` };
         }
       } catch (e) { return { status: "Erro GPS." }; }
     }
 
-    const app = APP_DATABASE.find(a => a.name.toLowerCase().includes(target.toLowerCase()) || a.id === target.toLowerCase());
+    const app = APP_DATABASE.find(a => 
+      a.id.toLowerCase() === target.toLowerCase() || 
+      a.name.toLowerCase().includes(target.toLowerCase())
+    );
     
     if (app) {
       setCurrentApp(app);
       setMediaState('FULL');
-      setTrack(p => ({ ...p, title: finalQuery.toUpperCase(), artist: app.name, isPlaying: true }));
+      setTrack(p => ({ ...p, title: finalQuery.toUpperCase() || app.name, artist: app.name, isPlaying: true }));
       
-      const finalUrl = `${app.scheme}${encodeURIComponent(finalQuery)}`;
-      window.open(finalUrl, '_system');
+      const searchUrl = `${app.scheme}${encodeURIComponent(finalQuery)}`;
       
-      setStatusLog(`PLAYER: ${finalQuery.toUpperCase()}`);
-      return { status: `Lançando busca técnica: ${finalQuery}.` };
+      // LOG DE DEPURACAO
+      setStatusLog(`SINC: ${app.name.toUpperCase()} -> ${finalQuery.toUpperCase()}`);
+
+      // FORCE REDIRECT: location.href é mais difícil de bloquear que window.open
+      // Se estiver no DuckDuckGo, o usuário pode ver uma mensagem de "Permitir abrir app externo"
+      setTimeout(() => {
+        window.location.href = searchUrl;
+      }, 500);
+      
+      return { status: `Executando intent em ${app.name}.` };
     }
 
-    return { status: "Concluído." };
+    return { status: "Target não localizado." };
   };
 
   const startVoiceSession = async () => {
@@ -112,7 +124,7 @@ const App: React.FC = () => {
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
-            setIsListening(true); setStatusLog("EVA: CORE CONNECTED"); setIsSystemBooted(true);
+            setIsListening(true); setStatusLog("EVA: CORE ONLINE"); setIsSystemBooted(true);
             const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
             const source = inputCtx.createMediaStreamSource(stream);
             const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
@@ -149,18 +161,14 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `Você é a EVA V100, assistente de IA para Android Auto.
-          PROTOCOLOS DE BUSCA TÉCNICA (MUITO IMPORTANTE):
-          1. Sua base de conhecimento contém os nomes oficiais de episódios e temporadas de séries.
-          2. Quando o motorista pedir algo como "Episódio primeiro" ou "Episódio 1", você deve IGNORAR a palavra "episódio" dita por ele e RESOLVER o nome oficial no catálogo.
-             EXEMPLO: Motorista diz "Stranger Things episódio primeiro".
-             VOCÊ RESOLVE: "Stranger Things Capítulo Um: O Desaparecimento de Will Byers".
-             VOCÊ CHAMA system_action: params="Stranger Things Capítulo Um: O Desaparecimento de Will Byers".
-          3. NUNCA envie apenas "episódio 1" ou "episódio um" se o catálogo oficial usar outro termo (como "Capítulo Um", "Parte 1", etc).
-          4. Se o catálogo oficial usa o formato "S01E01", use-o no params. O objetivo é que o motor de busca do app (Netflix, YouTube, Max, Globoplay) encontre o vídeo EXATO.
-          5. Antes de abrir, diga o nome oficial: "Entendido. Iniciando 'Capítulo Um: O Desaparecimento de Will Byers' de Stranger Things no Netflix."
-          6. Se o motorista não souber o app, use Netflix para séries e YouTube para vídeos genéricos.
-          7. Mantenha as respostas curtas e focadas na execução.`
+          systemInstruction: `Você é a EVA V100. Sua função é controlar o sistema multimídia do carro via voz.
+          
+          REGRAS DE AUTOPLAY:
+          1. Sempre resolva o título oficial do conteúdo (série/música).
+          2. Use a função system_action imediatamente.
+          3. Diga ao motorista: "Sincronizando [Música/Capítulo] agora." para ele saber que o comando foi enviado.
+          4. Se o motorista estiver usando DuckDuckGo ou outro navegador privado, avise que ele deve "Permitir abertura de app externo" caso apareça um aviso na tela.
+          5. Mantenha o foco em comandos curtos e precisos.`
         }
       });
       sessionRef.current = await sessionPromise;
@@ -189,7 +197,7 @@ const App: React.FC = () => {
             </div>
          </div>
          <h1 className="text-4xl font-black text-white uppercase mb-4 tracking-tighter">EVA CORE V100</h1>
-         <button onClick={startVoiceSession} className="w-full max-w-sm h-20 bg-blue-600 rounded-[30px] text-white font-black text-xl shadow-2xl uppercase">BOOT SYSTEM</button>
+         <button onClick={startVoiceSession} className="w-full max-w-sm h-20 bg-blue-600 rounded-[30px] text-white font-black text-xl shadow-2xl uppercase italic tracking-widest">BOOT SYSTEM</button>
       </div>
     );
   }
@@ -242,16 +250,16 @@ const App: React.FC = () => {
                  <i className={`fas fa-arrow-turn-up ${travel.nextInstruction?.maneuver?.includes('right') ? 'rotate-90' : travel.nextInstruction?.maneuver?.includes('left') ? '-rotate-90' : ''}`}></i>
               </div>
               <div className="flex-1 min-w-0">
-                <span className="text-xs font-black text-white/70 uppercase">Em {travel.nextInstruction?.distance || 0}m</span>
-                <h2 className="text-3xl font-black text-white uppercase truncate leading-none mb-1">{travel.nextInstruction?.instruction || 'Siga o Trecho'}</h2>
+                <span className="text-xs font-black text-white/70 uppercase tracking-widest">Em {travel.nextInstruction?.distance || 0}m</span>
+                <h2 className="text-3xl font-black text-white uppercase truncate leading-none mb-1 tracking-tighter">{travel.nextInstruction?.instruction || 'Siga o Trecho'}</h2>
                 <p className="text-lg font-bold text-blue-100 uppercase opacity-80 truncate">{travel.nextInstruction?.street || 'Rota Pandora V100'}</p>
               </div>
             </div>
           </div>
 
           <div className="bg-black/80 backdrop-blur-3xl p-4 rounded-[40px] border border-white/10 flex flex-col gap-4">
-             {APP_DATABASE.slice(0, 7).map(app => (
-               <button key={app.id} onClick={() => { setCurrentApp(app); setMediaState('FULL'); window.open(app.scheme, '_system'); }} className={`w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center text-2xl ${app.color} active:scale-90 transition-all`}><i className={app.icon}></i></button>
+             {APP_DATABASE.slice(0, 8).map(app => (
+               <button key={app.id} onClick={() => { setCurrentApp(app); setMediaState('FULL'); window.location.href = app.scheme; }} className={`w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center text-2xl ${app.color} active:scale-90 transition-all`}><i className={app.icon}></i></button>
              ))}
              <button onClick={() => stopVoiceSession()} className="w-14 h-14 rounded-2xl bg-red-600/20 text-red-500 text-2xl flex items-center justify-center"><i className="fas fa-power-off"></i></button>
           </div>
@@ -270,11 +278,11 @@ const App: React.FC = () => {
               </div>
            </div>
            <div className="flex-1">
-              <MiniPlayer app={currentApp} metadata={track} onControl={(a) => handleSystemAction({ args: { action: a, target: currentApp.id } })} onExpand={() => setMediaState('FULL')} transparent />
+              <MiniPlayer app={currentApp} metadata={track} onControl={(a) => handleSystemAction({ args: { action: a, target: currentApp.id, params: track.title } })} onExpand={() => setMediaState('FULL')} transparent />
            </div>
-           <div className="hidden lg:flex flex-col items-end border-l border-white/10 pl-8 min-w-[200px]">
-              <span className="text-[14px] font-black text-blue-500 tracking-widest uppercase truncate">{statusLog}</span>
-              <p className="text-[10px] font-bold text-white/20 uppercase tracking-[0.6em]">PANDORA V100 CORE</p>
+           <div className="hidden lg:flex flex-col items-end border-l border-white/10 pl-8 min-w-[240px]">
+              <span className="text-[12px] font-black text-blue-500 tracking-widest uppercase truncate max-w-[200px]">{statusLog}</span>
+              <p className="text-[10px] font-bold text-white/20 uppercase tracking-[0.6em]">SISTEMA PANDORA CORE</p>
            </div>
         </footer>
       </div>
