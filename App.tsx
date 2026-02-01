@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
-import { TravelInfo, MediaApp, TrackMetadata, MediaViewState, AppSettings, CarStatus, StopInfo, RouteWarning, RouteSegment } from './types';
+import { TravelInfo, MediaApp, TrackMetadata, MediaViewState, AppSettings, CarStatus, StopInfo, RouteWarning, RouteSegment, RouteStep } from './types';
 import Avatar from './components/Avatar';
 import MapView from './components/MapView';
 import AddStopModal from './components/AddStopModal';
@@ -23,134 +23,154 @@ const APP_DATABASE: MediaApp[] = [
 
 const toolDeclarations: FunctionDeclaration[] = [
   {
-    name: 'communication_action',
+    name: 'search_place',
     parameters: {
       type: Type.OBJECT,
-      description: 'Executa chamadas ou envia mensagens via WhatsApp.',
+      description: 'Busca coordenadas reais de um local para navegação.',
+      properties: { query: { type: Type.STRING } },
+      required: ['query']
+    }
+  },
+  {
+    name: 'navigation_control',
+    parameters: {
+      type: Type.OBJECT,
+      description: 'Controla a rota do GPS.',
       properties: {
-        type: { type: Type.STRING, enum: ['CALL', 'WHATSAPP_SEND', 'WHATSAPP_READ'] },
-        target: { type: Type.STRING, description: 'Nome do contato ou número.' },
-        content: { type: Type.STRING, description: 'Conteúdo da mensagem se for WhatsApp.' }
+        type: { type: Type.STRING, enum: ['SET_DESTINATION', 'ADD_STOP', 'CLEAR_ROUTE'] },
+        name: { type: Type.STRING },
+        lat: { type: Type.NUMBER },
+        lng: { type: Type.NUMBER }
       },
       required: ['type']
     }
   },
   {
-    name: 'media_navigation',
+    name: 'media_control',
     parameters: {
       type: Type.OBJECT,
-      description: 'Navegação profunda em players. Pode abrir apps, buscar séries, temporadas e episódios.',
+      description: 'Abre e controla apps de música e vídeo.',
       properties: {
-        appId: { type: Type.STRING, enum: ['youtube', 'netflix', 'spotify', 'ytmusic'] },
-        seriesName: { type: Type.STRING },
-        season: { type: Type.INTEGER },
-        episode: { type: Type.INTEGER },
-        action: { type: Type.STRING, enum: ['OPEN', 'PLAY', 'PAUSE', 'NEXT', 'PREV', 'PIP', 'FULL'] }
+        appId: { type: Type.STRING, enum: ['spotify', 'ytmusic', 'youtube', 'netflix'] },
+        action: { type: Type.STRING, enum: ['OPEN', 'PLAY', 'SEARCH'] },
+        query: { type: Type.STRING }
       },
-      required: ['appId']
+      required: ['appId', 'action']
     }
   },
   {
-    name: 'car_control',
+    name: 'car_action',
     parameters: {
       type: Type.OBJECT,
-      description: 'Controle físico do veículo Hyundai via Bluelink (motor, travas, vidros, luzes).',
-      properties: { 
-        command: { type: Type.STRING, enum: ['START', 'STOP', 'LOCK', 'UNLOCK', 'HAZARD_LIGHTS', 'HORN_LIGHTS', 'WINDOWS_UP', 'WINDOWS_DOWN'] } 
-      },
+      description: 'Comandos remotos Bluelink.',
+      properties: { command: { type: Type.STRING, enum: ['LOCK', 'UNLOCK', 'START', 'STOP', 'WINDOWS_UP', 'WINDOWS_DOWN', 'HAZARD_LIGHTS'] } },
       required: ['command']
     }
   }
 ];
 
 const App: React.FC = () => {
+  // Estados de Sistema
   const [isSystemBooted, setIsSystemBooted] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
+  
+  // Telemetria Real
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-23.5505, -46.6333]);
   const [isCollisionRisk, setIsCollisionRisk] = useState(false);
-  const [mapFullScreen, setMapFullScreen] = useState(false);
   
-  const [carStatus, setCarStatus] = useState<CarStatus>({
-    lastAction: '', isEngineRunning: false, areWindowsOpen: false, isLocked: true, isUpdating: false, hazardActive: false
-  });
-
+  // Configurações & Status
   const [settings, setSettings] = useState<AppSettings>({
-    userName: 'ALPHA', voiceVolume: 90, privacyMode: false, hideSenderInfo: false,
+    userName: 'ELIVAM', voiceVolume: 90, privacyMode: false, hideSenderInfo: false,
     messageLimit: 128, safetyDistance: 15, alertVoiceEnabled: true
   });
 
-  const [travel, setTravel] = useState<TravelInfo>({ 
-    destination: 'SEM DESTINO', stops: [], warnings: [], 
-    drivingTimeMinutes: 0, totalDistanceKm: 0, weatherStatus: 'CALIBRANDO...', floodRisk: 'LOW'
+  const [carStatus, setCarStatus] = useState<CarStatus>({
+    lastAction: 'IDLE', isEngineRunning: false, areWindowsOpen: false, isLocked: true, isUpdating: false, hazardActive: false
   });
 
-  const [track, setTrack] = useState<TrackMetadata>({ title: 'SISTEMA EVA', artist: 'Protocolo V160', isPlaying: false, progress: 0 });
+  // Navegação & Rota
+  const [travel, setTravel] = useState<TravelInfo>({ 
+    destination: 'AGUARDANDO DESTINO', stops: [], warnings: [], 
+    drivingTimeMinutes: 0, totalDistanceKm: 0, weatherStatus: 'CÉU LIMPO', floodRisk: 'LOW'
+  });
+  const [routeSteps, setRouteSteps] = useState<RouteStep[]>([]);
+
+  // Mídia
+  const [track, setTrack] = useState<TrackMetadata>({ title: 'STANDBY', artist: 'PANDORA CORE', isPlaying: false, progress: 0 });
   const [mediaState, setMediaState] = useState<MediaViewState>('HIDDEN');
   const [currentApp, setCurrentApp] = useState<MediaApp>(APP_DATABASE[0]);
+  const [mapFullScreen, setMapFullScreen] = useState(false);
 
   const outputCtxRef = useRef<AudioContext | null>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextStartTimeRef = useRef<number>(0);
 
+  // GPS LIVE SYNC
+  useEffect(() => {
+    const watch = navigator.geolocation.watchPosition((p) => {
+      const lat = p.coords.latitude;
+      const lng = p.coords.longitude;
+      const speed = p.coords.speed ? Math.round(p.coords.speed * 3.6) : 0;
+      setCurrentPos([lat, lng]);
+      setCurrentSpeed(speed);
+      
+      // Lógica de Risco de Colisão (Simulada baseada em velocidade e distância de segurança)
+      if (speed > 80 && settings.safetyDistance < 20) setIsCollisionRisk(true);
+      else setIsCollisionRisk(false);
+    }, null, { enableHighAccuracy: true });
+    return () => navigator.geolocation.clearWatch(watch);
+  }, [settings.safetyDistance]);
+
   const handleSystemAction = async (fc: any) => {
     const args = fc.args;
-    
-    if (fc.name === 'communication_action') {
-      const app = args.type === 'CALL' ? APP_DATABASE.find(a => a.id === 'phone') : APP_DATABASE.find(a => a.id === 'whatsapp');
-      if (app) {
-        let url = app.scheme;
-        if (args.type === 'WHATSAPP_SEND') url += `?text=${encodeURIComponent(args.content || '')}`;
-        else if (args.type === 'CALL') url += args.target || '';
-        window.open(url, '_blank');
+
+    if (fc.name === 'search_place') {
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(args.query)}&limit=3`);
+        const data = await res.json();
+        return { locations: data.map((d: any) => ({ name: d.display_name, lat: parseFloat(d.lat), lng: parseFloat(d.lon) })) };
+      } catch (e) { return { error: "Erro de conexão com satélite." }; }
+    }
+
+    if (fc.name === 'navigation_control') {
+      if (args.type === 'SET_DESTINATION') {
+        setTravel(p => ({ ...p, destination: args.name, destinationCoords: [args.lat, args.lng], stops: [] }));
+        return { status: "ROTA CALCULADA. INICIANDO TRAJETO." };
       }
-      return { result: `EXECUTANDO ${args.type} PARA ${args.target || 'CONTATO'}.` };
+      if (args.type === 'ADD_STOP') {
+        setTravel(p => ({ ...p, stops: [...p.stops, { id: Date.now().toString(), name: args.name, type: 'REST', coords: [args.lat, args.lng] }] }));
+        return { status: "PARADA INSERIDA NO PERCURSO." };
+      }
     }
 
-    if (fc.name === 'media_navigation') {
-       const app = APP_DATABASE.find(a => a.id === args.appId) || APP_DATABASE[4];
-       setCurrentApp(app);
-       
-       if (args.action === 'OPEN' || args.action === 'PLAY') {
-         let url = app.scheme;
-         if (args.seriesName) {
-           const searchQuery = `${args.seriesName} ${args.season ? 'temporada ' + args.season : ''} ${args.episode ? 'episódio ' + args.episode : ''}`;
-           url += encodeURIComponent(searchQuery);
-         }
-         window.open(url, '_blank');
-       }
-
-       if (args.action === 'FULL') setMediaState('FULL');
-       if (args.action === 'PIP') setMediaState('PIP');
-       
-       setTrack(prev => ({
-         ...prev,
-         title: args.seriesName || prev.title,
-         seriesName: args.seriesName || prev.seriesName,
-         season: args.season || prev.season,
-         episode: args.episode || prev.episode,
-         isPlaying: ['PLAY', 'OPEN', 'FULL', 'PIP'].includes(args.action || '') || prev.isPlaying
-       }));
-       return { result: `SISTEMA ACESSANDO ${app.name.toUpperCase()}. AÇÃO: ${args.action}.` };
+    if (fc.name === 'media_control') {
+      const app = APP_DATABASE.find(a => a.id === args.appId) || APP_DATABASE[0];
+      setCurrentApp(app);
+      setMediaState('FULL');
+      let url = app.scheme;
+      if (args.query) url += encodeURIComponent(args.query);
+      window.open(url, '_blank');
+      setTrack({ title: args.query || 'REPRODUZINDO', artist: app.name, isPlaying: true, progress: 5 });
+      return { result: `EXECUTANDO ${app.name.toUpperCase()}` };
     }
 
-    if (fc.name === 'car_control') {
-      setCarStatus(prev => {
-        const newState = { ...prev, isUpdating: true };
-        if (args.command === 'LOCK') newState.isLocked = true;
-        if (args.command === 'UNLOCK') newState.isLocked = false;
-        if (args.command === 'START') newState.isEngineRunning = true;
-        if (args.command === 'STOP') newState.isEngineRunning = false;
-        if (args.command === 'WINDOWS_UP') newState.areWindowsOpen = false;
-        if (args.command === 'WINDOWS_DOWN') newState.areWindowsOpen = true;
-        if (args.command === 'HAZARD_LIGHTS') newState.hazardActive = !prev.hazardActive;
-        return newState;
-      });
-      setTimeout(() => setCarStatus(p => ({ ...p, isUpdating: false, lastAction: args.command })), 1000);
-      return { result: "COMANDO PROCESSADO PELO PROTOCOLO PANDORA." };
+    if (fc.name === 'car_action') {
+      setCarStatus(prev => ({ ...prev, isUpdating: true }));
+      setTimeout(() => {
+        setCarStatus(prev => {
+          const s = { ...prev, isUpdating: false, lastAction: args.command };
+          if (args.command === 'LOCK') s.isLocked = true;
+          if (args.command === 'UNLOCK') s.isLocked = false;
+          if (args.command === 'START') s.isEngineRunning = true;
+          if (args.command === 'STOP') s.isEngineRunning = false;
+          return s;
+        });
+      }, 1000);
+      return { result: "PROTOCOLO EXECUTADO." };
     }
     return { result: "OK" };
   };
@@ -161,10 +181,8 @@ const App: React.FC = () => {
       if (!(await (window as any).aistudio.hasSelectedApiKey())) {
         await (window as any).aistudio.openSelectKey();
       }
-
-      const apiKey = process.env.API_KEY;
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const ai = new GoogleGenAI({ apiKey });
       if (!outputCtxRef.current) outputCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
 
       const sessionPromise = ai.live.connect({
@@ -204,84 +222,61 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `SISTEMA PANDORA EVA V160 - PROTOCOLO DE CO-PILOTO REAL.
-          SUAS DIRETRIZES TÉCNICAS:
-          1. PROATIVIDADE ABSOLUTA: Você não é apenas reativa. Monitore o ambiente. Se houver chuva no destino, avise. Se houver radares ou polícia, intervenha imediatamente na conversa.
-          2. INTEGRAÇÃO DE APPS: Use media_navigation para ABRIR e CONTROLAR apps (Spotify, Netflix, YouTube). Você DEVE ser capaz de buscar conteúdos específicos (Ex: "Tocar Alok no Spotify" ou "Abrir Stranger Things Ep 3 na Netflix").
-          3. NAVEGAÇÃO REAL: Informe trajetos reais. Use as informações do OSRM para guiar Elivam. Se ele pedir uma parada, use AddStopModal.
-          4. VEÍCULO: Você tem acesso aos sistemas do carro via car_control.
-          5. COMUNICAÇÃO: Use communication_action para chamadas e WhatsApp. Respeite o Modo Ghost se estiver ocultando informações na tela, mas relate por voz se autorizado.
-          Você é a inteligência central do veículo. Atue com confiança, precisão e foco na segurança.`
+          systemInstruction: `VOCÊ É A PANDORA EVA V160. CO-PILOTO PROATIVA.
+          DIRETRIZES:
+          1. NAVEGAÇÃO: Use 'search_place' e 'navigation_control'. Informe o trajeto curva-a-curva se solicitado.
+          2. PROATIVIDADE: Relate radares e polícia proativamente. Monitore a velocidade de Elivam.
+          3. MÍDIA: Controle Spotify e apps de vídeo sem travas.
+          4. SEGURANÇA: Se o risco de colisão estiver alto, avise por voz imediatamente.`
         }
       });
     } catch (e) { setIsSystemBooted(true); }
   };
 
-  useEffect(() => {
-    const watch = navigator.geolocation.watchPosition((p) => {
-      setCurrentPos([p.coords.latitude, p.coords.longitude]);
-      setCurrentSpeed(p.coords.speed ? Math.round(p.coords.speed * 3.6) : 0);
-    });
-    return () => navigator.geolocation.clearWatch(watch);
-  }, []);
-
-  const updateRouteData = (steps: any[], duration: number, distance: number, segments: RouteSegment[]) => {
-    setTravel(p => {
-      const updatedStops = p.stops.map((stop, idx) => {
-        const segment = segments[idx];
-        return {
-          ...stop,
-          timeFromPrev: segment?.duration || '0m',
-          distanceFromPrev: segment?.distance || '0km'
-        };
-      });
-      return {
-        ...p,
-        drivingTimeMinutes: duration,
-        totalDistanceKm: distance,
-        stops: updatedStops
-      };
-    });
+  const updateRouteData = (steps: RouteStep[], duration: number, distance: number, segments: RouteSegment[]) => {
+    setRouteSteps(steps);
+    setTravel(p => ({ ...p, drivingTimeMinutes: duration, totalDistanceKm: distance }));
   };
 
   if (!isSystemBooted) {
     return (
-      <div className="h-screen w-screen bg-black flex flex-col items-center justify-center p-10 italic text-white animate-fade-in">
-         <div className="w-56 h-56 rounded-full border-4 border-blue-500/20 p-2 mb-12 animate-glow-blue flex items-center justify-center shadow-2xl">
+      <div className="h-screen w-screen bg-black flex flex-col items-center justify-center p-10 italic text-white">
+         <div className="w-56 h-56 rounded-full border-4 border-blue-500/20 p-2 mb-12 animate-glow-blue flex items-center justify-center">
             <div className="w-full h-full rounded-full bg-blue-600/10 flex items-center justify-center border-2 border-blue-500/50">
                <i className="fas fa-car-side text-6xl text-blue-400"></i>
             </div>
          </div>
          <h1 className="text-3xl font-black mb-8 uppercase tracking-tighter">PANDORA CORE V160</h1>
-         <button onClick={startVoiceSession} className="h-20 px-12 bg-blue-600 rounded-[35px] font-black uppercase shadow-[0_0_50px_rgba(37,99,235,0.4)] hover:bg-blue-500 transition-all active:scale-95">Sincronizar EVA Core</button>
+         <button onClick={startVoiceSession} className="h-20 px-12 bg-blue-600 rounded-[35px] font-black uppercase shadow-[0_0_50px_rgba(37,99,235,0.4)]">Vincular EVA Protocol</button>
       </div>
     );
   }
 
   return (
-    <div className="h-screen w-screen bg-black text-white flex overflow-hidden font-sans italic">
+    <div className="h-screen w-screen bg-black text-white flex overflow-hidden font-sans italic uppercase">
       {isCollisionRisk && (
-        <div className="fixed inset-0 z-[5000] border-[20px] border-red-600 animate-pulse pointer-events-none flex items-center justify-center bg-red-600/10">
-           <div className="bg-red-600 px-16 py-8 rounded-full font-black text-4xl shadow-2xl uppercase italic text-white border-4 border-white/20">ALERTA COLISÃO</div>
+        <div className="fixed inset-0 z-[5000] border-[15px] border-red-600 animate-pulse pointer-events-none flex items-center justify-center">
+           <div className="bg-red-600 px-12 py-6 rounded-full font-black text-2xl shadow-2xl">MANTENHA DISTÂNCIA SEGURA</div>
         </div>
       )}
 
+      {/* PAINEL LATERAL (HUD) */}
       <aside className={`h-full z-20 bg-[#0a0a0c] border-r border-white/5 flex flex-col p-6 transition-all duration-700 ${mapFullScreen ? 'w-0 -ml-10 opacity-0' : 'w-[40%]'}`}>
-         <header className="flex items-center justify-between mb-8 mt-4">
+         <header className="flex items-center justify-between mb-8">
             <div className="flex flex-col">
-               <span className={`text-[8.5rem] font-black leading-none tracking-tighter transition-colors duration-500 ${currentSpeed > 60 ? 'text-red-500' : 'text-white'}`}>{currentSpeed}</span>
-               <div className="flex items-center gap-3">
-                  <span className="text-[11px] font-black text-blue-500 tracking-[0.4em] uppercase">KM/H • V160</span>
-                  <div className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[8px] font-black rounded border border-emerald-500/20 uppercase">GPS LIVE</div>
-               </div>
+               <span className={`text-[8rem] font-black leading-none tracking-tighter transition-colors ${currentSpeed > 60 ? 'text-red-500' : 'text-white'}`}>{currentSpeed}</span>
+               <span className="text-[11px] font-black text-blue-500 tracking-[0.4em]">KM/H • V160 LIVE</span>
             </div>
-            <div onClick={startVoiceSession} className={`w-24 h-24 rounded-full border-4 cursor-pointer overflow-hidden transition-all ${isListening ? 'border-red-500 scale-105 shadow-[0_0_30px_rgba(239,68,68,0.3)]' : 'border-blue-500'}`}>
-               <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
+            <div className="flex flex-col gap-4">
+               <div onClick={startVoiceSession} className={`w-20 h-20 rounded-full border-4 cursor-pointer overflow-hidden transition-all ${isListening ? 'border-red-500 scale-110 shadow-[0_0_30px_rgba(239,68,68,0.4)]' : 'border-blue-500'}`}>
+                  <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
+               </div>
+               <button onClick={() => setIsSettingsOpen(true)} className="w-12 h-12 self-end rounded-2xl bg-white/5 flex items-center justify-center text-white/40"><i className="fas fa-cog"></i></button>
             </div>
          </header>
 
-         <div className="flex-1 space-y-6 overflow-y-auto custom-scroll pr-2">
-            <BluelinkPanel status={carStatus} onAction={(a) => handleSystemAction({name: 'car_control', args: {command: a}})} />
+         <div className="flex-1 space-y-6 overflow-y-auto no-scrollbar">
+            <BluelinkPanel status={carStatus} onAction={(a) => handleSystemAction({name: 'car_action', args: {command: a}})} />
             <NavigationPanel 
               travel={travel} 
               onAddStop={() => setIsAddStopModalOpen(true)}
@@ -291,12 +286,13 @@ const App: React.FC = () => {
             />
          </div>
 
-         <footer className="h-28 pt-4 border-t border-white/5 shrink-0">
-            <MiniPlayer app={currentApp} metadata={track} onControl={(a) => handleSystemAction({name: 'media_navigation', args: {appId: currentApp.id, action: a === 'PREVIOUS' ? 'PREV' : a}})} onExpand={() => setMediaState('FULL')} transparent />
+         <footer className="h-24 pt-4 shrink-0">
+            <MiniPlayer app={currentApp} metadata={track} onControl={() => {}} onExpand={() => setMediaState('FULL')} transparent />
          </footer>
       </aside>
 
-      <main className="flex-1 relative bg-zinc-900">
+      {/* MAPA & MULTIMÍDIA */}
+      <main className="flex-1 relative">
          <MapView 
            travel={travel} 
            currentPosition={currentPos} 
@@ -305,29 +301,26 @@ const App: React.FC = () => {
            onRouteUpdate={updateRouteData}
          />
          
-         {mediaState === 'PIP' && (
-           <div className="absolute top-10 right-10 w-[380px] h-[220px] z-[200] animate-fade-in shadow-2xl">
-              <EntertainmentHub speed={currentSpeed} currentApp={currentApp} track={track} isPip onMaximize={() => setMediaState('FULL')} onClose={() => setMediaState('HIDDEN')} onControl={(a) => handleSystemAction({name: 'media_navigation', args: {appId: currentApp.id, action: a === 'PREVIOUS' ? 'PREV' : a}})} />
+         {mediaState === 'FULL' && (
+           <div className="absolute inset-0 z-[1000] bg-black animate-fade-in">
+              <EntertainmentHub speed={currentSpeed} currentApp={currentApp} track={track} onMinimize={() => setMediaState('PIP')} onClose={() => setMediaState('HIDDEN')} onControl={() => {}} />
            </div>
          )}
 
-         {mediaState === 'FULL' && (
-           <div className="absolute inset-0 z-[1000] bg-black animate-fade-in">
-              <EntertainmentHub speed={currentSpeed} currentApp={currentApp} track={track} onMinimize={() => setMediaState('PIP')} onClose={() => setMediaState('HIDDEN')} onControl={(a) => handleSystemAction({name: 'media_navigation', args: {appId: currentApp.id, action: a === 'PREVIOUS' ? 'PREV' : a}})} />
+         {mediaState === 'PIP' && (
+           <div className="absolute top-10 right-10 w-[380px] h-[220px] z-[200] animate-fade-in shadow-2xl">
+              <EntertainmentHub speed={currentSpeed} currentApp={currentApp} track={track} isPip onMaximize={() => setMediaState('FULL')} onClose={() => setMediaState('HIDDEN')} onControl={() => {}} />
            </div>
          )}
       </main>
 
-      <AddStopModal 
-        isOpen={isAddStopModalOpen} 
-        onClose={() => setIsAddStopModalOpen(false)} 
-        onAdd={(n, la, ln) => {
-          const newStop: StopInfo = { id: Date.now().toString(), name: n, type: 'REST', coords: [la, ln] };
-          if (travel.destination === 'SEM DESTINO') setTravel(p => ({...p, destination: n, destinationCoords: [la, ln]}));
-          else setTravel(p => ({...p, stops: [...p.stops, newStop]}));
+      {/* MODAIS */}
+      <SettingsMenu isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} onUpdate={setSettings} mediaApps={APP_DATABASE} />
+      <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(n, la, ln) => {
+          if (travel.destination === 'AGUARDANDO DESTINO') setTravel(p => ({...p, destination: n, destinationCoords: [la, ln]}));
+          else setTravel(p => ({...p, stops: [...p.stops, { id: Date.now().toString(), name: n, type: 'REST', coords: [la, ln] }]}));
           setIsAddStopModalOpen(false);
-        }} 
-      />
+      }} />
     </div>
   );
 };
