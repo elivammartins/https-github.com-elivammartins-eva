@@ -4,9 +4,9 @@
     "microphone",
     "geolocation"
   ],
-  "name": "EVA CORE V160",
-  "short_name": "EVA",
-  "description": "Co-Piloto Inteligente Proativa V160 - PANDORA CORE",
+  "name": "EVA PANDORA V160",
+  "short_name": "EVA CORE",
+  "description": "Sentinela de Trajeto e Co-Piloto Inteligente PANDORA V160",
   "theme_color": "#000000",
   "background_color": "#000000"
 }

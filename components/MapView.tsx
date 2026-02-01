@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef } from 'react';
-import { TravelInfo, RouteStep, RouteSegment, MapMode, MapLayer } from '../types';
+import { TravelInfo, MapMode, MapLayer } from '../types';
 
 declare const L: any;
 
@@ -12,10 +12,10 @@ interface MapViewProps {
   mode: MapMode;
   layer: MapLayer;
   onToggleFullScreen: () => void;
-  onRouteUpdate?: (steps: RouteStep[], duration: number, distance: number, segments: RouteSegment[]) => void;
+  onRouteUpdate?: (steps: any[], duration: number, distance: number, segments: any[]) => void;
 }
 
-const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, isFullScreen, mode, layer, onToggleFullScreen, onRouteUpdate }) => {
+const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, mode, layer, onRouteUpdate }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const layersRef = useRef<{ [key: string]: any }>({});
@@ -27,7 +27,7 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, isF
     
     if (!mapRef.current) {
       mapRef.current = L.map(mapContainerRef.current, { 
-        zoomControl: false, attributionControl: false, center: currentPosition, zoom: 17
+        zoomControl: false, attributionControl: false, center: currentPosition, zoom: 18
       });
 
       layersRef.current.DARK = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png').addTo(mapRef.current);
@@ -36,10 +36,10 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, isF
       const vehicleIcon = L.divIcon({
         className: 'vehicle-marker',
         html: `
-          <div id="nav-arrow-waze" class="nav-container" style="transform: rotate(${heading}deg);">
+          <div id="nav-arrow" class="nav-container" style="transform: rotate(${heading}deg);">
             <div class="glow-effect"></div>
             <svg width="60" height="60" viewBox="0 0 100 100">
-               <path d="M50 0 L100 100 L50 80 L0 100 Z" fill="#33CCFF" stroke="white" stroke-width="2" />
+               <path d="M50 0 L100 100 L50 80 L0 100 Z" fill="#06B6D4" stroke="white" stroke-width="4" />
             </svg>
           </div>
         `,
@@ -52,25 +52,22 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, isF
 
   useEffect(() => {
     if (!mapRef.current) return;
-    Object.values(layersRef.current).forEach(l => mapRef.current.removeLayer(l));
-    layersRef.current[layer].addTo(mapRef.current);
-
     const mapEl = mapContainerRef.current;
     if (mapEl) {
-      if (mode === '3D' || mode === 'STREET') {
-        mapEl.style.transform = 'perspective(800px) rotateX(45deg) scale(1.3)';
-        mapRef.current.setZoom(mode === 'STREET' ? 19 : 17);
+      if (mode === '3D') {
+        mapEl.style.transform = 'perspective(1200px) rotateX(55deg) scale(1.5)';
+        mapRef.current.setZoom(18);
       } else {
-        mapEl.style.transform = 'perspective(800px) rotateX(0deg) scale(1)';
-        mapRef.current.setZoom(15);
+        mapEl.style.transform = 'none';
+        mapRef.current.setZoom(16);
       }
     }
-  }, [mode, layer]);
+  }, [mode]);
 
   useEffect(() => {
     if (vehicleMarkerRef.current) {
       vehicleMarkerRef.current.setLatLng(currentPosition);
-      const arrow = document.getElementById('nav-arrow-waze');
+      const arrow = document.getElementById('nav-arrow');
       if (arrow) arrow.style.transform = `rotate(${heading}deg)`;
     }
     if (mapRef.current) {
@@ -99,16 +96,11 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, isF
         if (data.routes?.[0]) {
           if (routeLayerRef.current) mapRef.current.removeLayer(routeLayerRef.current);
           routeLayerRef.current = L.geoJSON(data.routes[0].geometry, { 
-            style: { color: '#33CCFF', weight: 14, opacity: 0.9, lineJoin: 'round' } 
+            style: { color: '#06B6D4', weight: 18, opacity: 0.8, lineJoin: 'round', lineCap: 'round' } 
           }).addTo(mapRef.current);
 
           if (onRouteUpdate) {
             onRouteUpdate([], Math.round(data.routes[0].duration/60), Math.round(data.routes[0].distance/1000), []);
-          }
-          
-          // Ajusta o zoom para ver a rota inteira se houver mudanças grandes
-          if (travel.stops.length > 0) {
-            mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [100, 100] });
           }
         }
       } catch (e) { console.error("OSRM Failure", e); }
@@ -119,17 +111,11 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, isF
   return (
     <div className="w-full h-full overflow-hidden relative bg-black">
       <div ref={mapContainerRef} className="w-full h-full transition-all duration-1000 ease-in-out origin-bottom" />
-      
-      <div className="absolute bottom-10 right-10 z-[100] flex flex-col gap-4">
-         <button onClick={onToggleFullScreen} className="w-20 h-20 rounded-3xl bg-black/80 backdrop-blur-xl border border-white/20 text-white shadow-2xl flex items-center justify-center">
-            <i className={`fas ${isFullScreen ? 'fa-compress' : 'fa-expand'}`}></i>
-         </button>
-      </div>
-
       <style>{`
-        .nav-container { position: relative; width: 60px; height: 60px; transition: transform 0.3s ease; filter: drop-shadow(0 0 15px rgba(51,204,255,0.8)); }
-        .glow-effect { position: absolute; top: 50%; left: 50%; width: 25px; height: 25px; background: #33CCFF; filter: blur(25px); transform: translate(-50%, -50%); opacity: 0.6; }
+        .nav-container { position: relative; width: 60px; height: 60px; transition: transform 0.2s ease-out; filter: drop-shadow(0 0 20px rgba(6,182,212,0.9)); }
+        .glow-effect { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; background: #06B6D4; filter: blur(30px); transform: translate(-50%, -50%); opacity: 0.7; }
         .vehicle-marker { pointer-events: none !important; }
+        .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(0.6) contrast(1.2) saturate(0.5); }
       `}</style>
     </div>
   );

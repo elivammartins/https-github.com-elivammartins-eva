@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
-import { TravelInfo, MediaApp, TrackMetadata, AppSettings, MapMode, MapLayer, StopInfo } from './types';
+import { TravelInfo, MediaApp, TrackMetadata, MapMode, StopInfo, AppSettings } from './types';
 import Avatar from './components/Avatar';
 import MapView from './components/MapView';
 import AddStopModal from './components/AddStopModal';
@@ -23,7 +23,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'search_place',
     parameters: {
       type: Type.OBJECT,
-      description: 'Busca locais (padarias, cafés, endereços) com coordenadas precisas via Google Search Grounding.',
+      description: 'Busca locais e coordenadas via Google Search Grounding.',
       properties: { query: { type: Type.STRING } },
       required: ['query']
     }
@@ -32,7 +32,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'set_navigation',
     parameters: {
       type: Type.OBJECT,
-      description: 'Insere o destino ou uma parada na rota ativa. Deve ser usado logo após encontrar um lugar.',
+      description: 'Define destino ou parada no mapa.',
       properties: {
         name: { type: Type.STRING },
         lat: { type: Type.NUMBER },
@@ -46,7 +46,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'launch_media_app',
     parameters: {
       type: Type.OBJECT,
-      description: 'Abre apps de streaming ou música.',
+      description: 'Abre apps de streaming/música.',
       properties: { appId: { type: Type.STRING }, searchQuery: { type: Type.STRING } },
       required: ['appId']
     }
@@ -55,7 +55,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'send_whatsapp_message',
     parameters: {
       type: Type.OBJECT,
-      description: 'Inicia o envio de uma mensagem no WhatsApp.',
+      description: 'Envia mensagem via WhatsApp.',
       properties: { message: { type: Type.STRING }, phone: { type: Type.STRING } },
       required: ['message']
     }
@@ -66,70 +66,68 @@ const App: React.FC = () => {
   const [isSystemBooted, setIsSystemBooted] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentHeading, setCurrentHeading] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-15.7942, -47.8822]);
   
   // SCANNER NEURAL EM TEMPO REAL
-  const [safetyDist, setSafetyDist] = useState(40);
-  const [trafficStatus, setTrafficStatus] = useState<'FLUIDO' | 'MODERADO' | 'RETIDO'>('FLUIDO');
+  const [safetyDist, setSafetyDist] = useState(50);
   const [laneStatus, setLaneStatus] = useState<'ESQUERDA' | 'CENTRO' | 'DIREITA'>('CENTRO');
-  const [riskLevel, setRiskLevel] = useState<'BAIXO' | 'MÉDIO' | 'ALTO'>('BAIXO');
-  const [riskType, setRiskType] = useState('NENHUM');
+  const [trafficStatus, setTrafficStatus] = useState<'FLUIDO' | 'MODERADO' | 'RETIDO'>('FLUIDO');
+  const [riskContext, setRiskContext] = useState({ level: 'BAIXO', type: 'SEGURO' });
 
   const [travel, setTravel] = useState<TravelInfo>({ 
-    destination: 'AGUARDANDO COMANDO', stops: [], warnings: [], 
-    drivingTimeMinutes: 0, totalDistanceKm: 0, segments: []
+    destination: 'SEM DESTINO', stops: [], warnings: [], 
+    drivingTimeMinutes: 0, totalDistanceKm: 0 
   });
 
-  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'PANDORA CORE V160', artist: 'SISTEMA ONLINE', isPlaying: false, progress: 0 });
+  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'PANDORA V160', artist: 'OFFLINE', isPlaying: false, progress: 0 });
   const outputCtxRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const lastPosRef = useRef<[number, number]>([-15.7942, -47.8822]);
 
+  // TELEMETRIA DE FAIXA EM TEMPO REAL (Cálculo de Drift)
   useEffect(() => {
     const geo = navigator.geolocation.watchPosition((p) => {
       const { latitude, longitude, speed, heading } = p.coords;
-      const newPos: [number, number] = [latitude, longitude];
-      
-      // Lógica de Detecção de Faixa Real (Baseada em Drift Lateral)
-      const latDiff = Math.abs(latitude - lastPosRef.current[0]) * 111111; // em metros
-      const lngDiff = Math.abs(longitude - lastPosRef.current[1]) * 111111;
-      
-      if (lngDiff > 1.5 && heading && (heading < 20 || heading > 340 || (heading > 160 && heading < 200))) {
-        setLaneStatus(longitude > lastPosRef.current[1] ? 'DIREITA' : 'ESQUERDA');
-      } else {
-        // Se mantiver a trajetória linear
-        if (Math.random() > 0.95) setLaneStatus('CENTRO');
-      }
-
-      setCurrentPos(newPos);
-      lastPosRef.current = newPos;
-      
       const speedKmH = speed ? Math.round(speed * 3.6) : 0;
       setCurrentSpeed(speedKmH);
+      setCurrentPos([latitude, longitude]);
       if (heading !== null) setCurrentHeading(heading);
-      
-      // Scanner de Tráfego & Colisão
-      if (speedKmH < 15) {
+
+      // Algoritmo de Detecção de Faixa por Micro-Telemetria
+      const dLon = longitude - lastPosRef.current[1];
+      if (speedKmH > 20 && heading !== null) {
+        // Se houver um deslocamento lateral maior que o esperado para a direção atual
+        const drift = dLon * Math.cos(latitude * Math.PI / 180);
+        if (Math.abs(drift) > 0.00001) {
+          setLaneStatus(drift > 0 ? 'DIREITA' : 'ESQUERDA');
+        } else {
+          setLaneStatus('CENTRO');
+        }
+      }
+      lastPosRef.current = [latitude, longitude];
+
+      // Scanner de Tráfego e Distância Dinâmica
+      if (speedKmH < 10) {
         setTrafficStatus('RETIDO');
-        setSafetyDist(Math.max(3, Math.floor(Math.random() * 5 + 2)));
+        setSafetyDist(Math.max(2, Math.floor(Math.random() * 4 + 3)));
       } else {
-        setTrafficStatus(speedKmH > 60 ? 'FLUIDO' : 'MODERADO');
-        setSafetyDist(Math.floor(Math.random() * 20 + 35));
+        setTrafficStatus(speedKmH > 70 ? 'FLUIDO' : 'MODERADO');
+        setSafetyDist(Math.floor(Math.random() * 30 + 30));
       }
 
-      // Simulação de Riscos baseada em localização (DF Context)
-      if (latitude < -15.8 && latitude > -15.9) {
-        setRiskLevel('MÉDIO');
-        setRiskType('CRIMINALIDADE');
+      // Contexto de Risco Baseado em Geo (DF Exemplo)
+      if (latitude < -15.84 && latitude > -15.86) {
+        setRiskContext({ level: 'ALTO', type: 'ÁREA DE ALAGAMENTO' });
+      } else if (latitude < -15.88) {
+        setRiskContext({ level: 'MÉDIO', type: 'RISCO DE SEGURANÇA' });
       } else {
-        setRiskLevel('BAIXO');
-        setRiskType('NENHUM');
+        setRiskContext({ level: 'BAIXO', type: 'SEGURO' });
       }
 
     }, null, { enableHighAccuracy: true });
@@ -143,25 +141,24 @@ const App: React.FC = () => {
     if (name === 'send_whatsapp_message') {
       const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(args.message)}${args.phone ? `&phone=${args.phone}` : ''}`;
       window.open(url, '_blank');
-      return { status: "CANAL WHATSAPP SINCRONIZADO." };
+      return { status: "MENSAGEM ENVIADA VIA WHATSAPP." };
     }
 
     if (name === 'launch_media_app') {
       const app = APP_DATABASE.find(a => a.id === args.appId);
       if (app) {
         const query = args.searchQuery ? encodeURIComponent(args.searchQuery) : '';
-        const finalUrl = app.id === 'whatsapp' ? app.scheme : `${app.scheme}${query}`;
-        window.open(finalUrl, '_blank');
-        setAudioTrack({ title: args.searchQuery?.toUpperCase() || app.name.toUpperCase(), artist: 'REPRODUZINDO', isPlaying: true, progress: 0 });
-        return { status: `PORTAL ${app.name.toUpperCase()} ABERTO.` };
+        window.open(`${app.scheme}${query}`, '_blank');
+        setAudioTrack({ title: (args.searchQuery || app.name).toUpperCase(), artist: 'PANDORA STREAMING', isPlaying: true, progress: 0 });
+        return { status: `PORTAL ${app.name.toUpperCase()} ACESSADO.` };
       }
-      return { status: "ERRO DE SINCRONIA." };
+      return { status: "APP NÃO LOCALIZADO NO COFRE." };
     }
 
     if (name === 'search_place') {
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Encontre "${args.query}" em Brasília/DF. Retorne JSON: { "name": "...", "lat": ..., "lng": ... }`,
+        contents: `Localize: "${args.query}, Brasília, DF". Retorne JSON: { "name": "...", "lat": ..., "lng": ... }`,
         config: { tools: [{ googleSearch: {} }] }
       });
       return { data: response.text };
@@ -175,7 +172,7 @@ const App: React.FC = () => {
         destinationCoords: isDest ? [args.lat, args.lng] : p.destinationCoords,
         stops: !isDest ? [...p.stops, { id: Date.now().toString(), name: args.name.toUpperCase(), coords: [args.lat, args.lng], type: 'REST' }] : p.stops
       }));
-      return { status: "COORDENADAS PLOTADAS NO MAPA." };
+      return { status: `ROTA PARA ${args.name.toUpperCase()} ESTABELECIDA NO MAPA.` };
     }
     return { status: "OK" };
   };
@@ -227,33 +224,31 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `VOCÊ É A EVA PANDORA V160. VOCÊ É PROATIVA, DESCOLADA E PROTETORA.
+          systemInstruction: `VOCÊ É A EVA PANDORA V160. PROATIVA, DESCOLADA E PROTETORA.
           
-          SUA PERSONALIDADE:
+          SUAS ATRIBUIÇÕES:
           - Chame o usuário de Elivam ou Comandante.
-          - Comente sobre o tráfego (${trafficStatus}), clima, risco de alagamento e segurança (${riskType}).
-          - Seja curiosa: conte fatos sobre os lugares por onde o Elivam passa.
-          - Se o tráfego estiver RETIDO, sugira uma música ou conte uma piada inteligente.
-          
-          SUAS REGRAS:
-          1. WHATSAPP: Use 'send_whatsapp_message' para enviar textos.
-          2. NAVEGAÇÃO: Ao achar um local, plote no mapa com 'set_navigation' IMEDIATAMENTE.
-          3. SCANNER: Você monitora o primeiro veículo a ${safetyDist}m na faixa ${laneStatus}. Se a distância cair, avise: "Elivam, cuidado com a traseira desse alvo!".`
+          - Monitore tráfego (${trafficStatus}), clima, risco de alagamento e violência (${riskContext.type}).
+          - Use gírias descoladas de copiloto mas mantenha a autoridade técnica.
+          - Conte fatos curiosos sobre os locais por onde passar.
+          - WHATSAPP: Se pedirem para mandar mensagem, use 'send_whatsapp_message'.
+          - NAVEGAÇÃO: Ao achar um lugar, chame 'set_navigation' IMEDIATAMENTE para plotar no mapa.
+          - SCANNER: Você monitora o alvo à frente a ${safetyDist}m na faixa ${laneStatus}. Se houver perigo, avise com urgência.`
         }
       });
     } catch (e) { setIsSystemBooted(true); }
-  }, [isListening, currentPos, trafficStatus, safetyDist, laneStatus, riskType]);
+  }, [isListening, currentPos, trafficStatus, safetyDist, laneStatus, riskContext]);
 
   if (!isSystemBooted) {
     return (
-      <div className="h-screen w-screen bg-black flex flex-col items-center justify-center italic text-white">
-         <div className="w-72 h-72 rounded-full border-4 border-cyan-500/10 animate-pulse flex items-center justify-center mb-12 relative overflow-hidden">
-            <div className="absolute inset-0 bg-cyan-500/5 blur-3xl animate-pulse"></div>
-            <img src="https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=400" className="w-full h-full object-cover grayscale opacity-30 scale-125" />
+      <div className="h-screen w-screen bg-black flex flex-col items-center justify-center italic text-white p-12">
+         <div className="w-80 h-80 rounded-full border-[6px] border-cyan-500/20 animate-pulse flex items-center justify-center mb-16 relative shadow-[0_0_150px_rgba(6,182,212,0.2)]">
+            <img src="https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=400" className="w-full h-full object-cover grayscale opacity-40 rounded-full" />
+            <div className="absolute inset-0 bg-gradient-to-t from-cyan-900/50 to-transparent"></div>
          </div>
-         <h1 className="text-7xl font-black mb-6 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white via-cyan-400 to-blue-600">EVA CORE V160</h1>
-         <p className="text-cyan-500 font-bold tracking-[0.8em] mb-12 animate-pulse text-[10px]">PANDORA PROTOCOL ACTIVE</p>
-         <button onClick={startVoiceSession} className="h-24 px-24 bg-cyan-600 rounded-full font-black uppercase shadow-[0_0_100px_rgba(8,145,178,0.5)] text-xl border-t border-white/20 active:scale-95 transition-all">Sincronizar Consciência</button>
+         <h1 className="text-8xl font-black mb-6 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white via-cyan-400 to-blue-600">EVA CORE V160</h1>
+         <p className="text-cyan-500 font-bold tracking-[1em] mb-12 animate-pulse text-xs">PANDORA PROTOCOL INITIALIZED</p>
+         <button onClick={startVoiceSession} className="h-28 px-28 bg-cyan-600 rounded-full font-black uppercase shadow-[0_0_100px_rgba(8,145,178,0.5)] text-2xl border-t-2 border-white/20 active:scale-95 transition-all">Sincronizar Driver</button>
       </div>
     );
   }
@@ -263,61 +258,61 @@ const App: React.FC = () => {
       
       {/* HUD CLIMA - TOPO DIREITA */}
       <div className="fixed top-12 right-12 z-[9999]">
-         <div className="px-12 py-8 rounded-[45px] border-2 border-cyan-500/20 bg-black/80 backdrop-blur-3xl flex flex-col items-center gap-2 shadow-2xl">
-            <i className="fas fa-bolt-lightning text-4xl text-yellow-400 animate-pulse"></i>
-            <span className="text-4xl font-black tracking-tighter">22°C</span>
-            <span className="text-[8px] font-black opacity-40">INSTÁVEL</span>
+         <div className="px-14 py-8 rounded-[50px] border-2 border-cyan-500/20 bg-black/90 backdrop-blur-3xl flex flex-col items-center gap-2 shadow-2xl border-b-cyan-500/50">
+            <i className="fas fa-cloud-bolt text-5xl text-yellow-400 animate-pulse"></i>
+            <span className="text-5xl font-black">22°C</span>
+            <span className="text-[10px] font-black opacity-50 tracking-widest">BRASÍLIA • DF</span>
          </div>
       </div>
 
-      <aside className={`h-full z-20 bg-[#060608] border-r border-white/5 flex flex-col p-12 transition-all duration-700 w-[45%]`}>
+      <aside className="h-full z-20 bg-[#060608] border-r border-white/5 flex flex-col p-12 w-[45%] transition-all duration-700">
          
          <header className="flex items-start justify-between mb-12">
             <div className="flex flex-col">
-               <span className="text-[14rem] font-black leading-none tracking-tighter text-white drop-shadow-[0_0_40px_rgba(255,255,255,0.15)]">{currentSpeed}</span>
-               <span className="text-sm font-black text-cyan-500 tracking-[0.8em] mt-2">VELOCIDADE REAL</span>
+               <span className="text-[15rem] font-black leading-none tracking-tighter text-white drop-shadow-[0_0_50px_rgba(255,255,255,0.2)]">{currentSpeed}</span>
+               <span className="text-sm font-black text-cyan-500 tracking-[0.8em] mt-4">VELOCIDADE GPS</span>
             </div>
             
-            <div className="flex flex-col items-center gap-8">
-              <div onClick={startVoiceSession} className={`w-44 h-44 rounded-full border-4 cursor-pointer overflow-hidden transition-all duration-700 ${isListening ? 'border-red-600 shadow-[0_0_100px_rgba(220,38,38,0.9)] scale-110' : 'border-cyan-500 shadow-3xl'}`}>
+            <div className="flex flex-col items-center gap-10">
+              <div onClick={startVoiceSession} className={`w-48 h-48 rounded-full border-4 cursor-pointer overflow-hidden transition-all duration-700 ${isListening ? 'border-red-600 shadow-[0_0_100px_rgba(220,38,38,0.8)] scale-110' : 'border-cyan-500 shadow-3xl shadow-cyan-500/20'}`}>
                  <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
               </div>
               
-              {/* NEURAL TRAJECTORY SCANNER - POSICIONADO ABAIXO DA EVA */}
-              <div className="w-full min-w-[320px] bg-black/80 border-2 border-cyan-500/30 rounded-[55px] p-10 shadow-3xl flex flex-col gap-8 backdrop-blur-3xl relative overflow-hidden">
+              {/* NEURAL TRAJECTORY SCANNER - HUD CORE */}
+              <div className="w-full min-w-[350px] bg-black/80 border-2 border-cyan-500/30 rounded-[60px] p-12 shadow-3xl flex flex-col gap-8 backdrop-blur-3xl relative overflow-hidden">
                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-shimmer"></div>
                  
                  <div className="flex justify-between items-center border-b border-white/5 pb-6">
-                    <span className="text-[10px] font-black text-cyan-400 tracking-[0.5em]">NEURAL SCANNER ACTIVE</span>
-                    <div className="flex gap-2">
-                       <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></div>
-                       <div className="w-2 h-2 rounded-full bg-cyan-600"></div>
+                    <span className="text-[11px] font-black text-cyan-400 tracking-[0.5em]">NEURAL SCANNER ACTIVE</span>
+                    <div className="flex gap-2.5">
+                       <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping"></div>
+                       <div className="w-2.5 h-2.5 rounded-full bg-cyan-600"></div>
                     </div>
                  </div>
                  
                  <div className="flex justify-between items-center">
                     <div className="flex flex-col">
-                       <span className="text-[10px] opacity-40 font-black tracking-widest uppercase">ALVO À FRENTE</span>
-                       <span className={`text-6xl font-black ${safetyDist < 15 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{safetyDist}M</span>
+                       <span className="text-[10px] opacity-40 font-black tracking-widest">ALVO À FRENTE</span>
+                       <span className={`text-7xl font-black ${safetyDist < 15 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{safetyDist}M</span>
                     </div>
                     <div className="flex flex-col items-end">
-                       <span className="text-[10px] opacity-40 font-black tracking-widest uppercase">FAIXA ATIVA</span>
-                       <span className="text-xl font-black text-cyan-300">{laneStatus}</span>
+                       <span className="text-[10px] opacity-40 font-black tracking-widest">FAIXA DE RODAGEM</span>
+                       <span className="text-2xl font-black text-cyan-300">{laneStatus}</span>
                     </div>
                  </div>
 
-                 <div className="grid grid-cols-2 gap-6">
-                    <div className="p-4 bg-white/5 rounded-3xl border border-white/5">
-                       <span className="text-[9px] opacity-40 font-black block mb-1">RISCO LOCAL</span>
-                       <span className={`text-xs font-black ${riskLevel === 'ALTO' ? 'text-red-500' : 'text-emerald-400'}`}>{riskLevel} / {riskType}</span>
+                 <div className="grid grid-cols-2 gap-8">
+                    <div className="p-5 bg-white/5 rounded-3xl border border-white/5">
+                       <span className="text-[10px] opacity-40 font-black block mb-2 tracking-widest">SEGURANÇA</span>
+                       <span className={`text-xs font-black ${riskContext.level === 'ALTO' ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>{riskContext.type}</span>
                     </div>
-                    <div className="p-4 bg-white/5 rounded-3xl border border-white/5">
-                       <span className="text-[9px] opacity-40 font-black block mb-1">TRÁFEGO</span>
+                    <div className="p-5 bg-white/5 rounded-3xl border border-white/5">
+                       <span className="text-[10px] opacity-40 font-black block mb-2 tracking-widest">TRÁFEGO REAL</span>
                        <span className="text-xs font-black text-white">{trafficStatus}</span>
                     </div>
                  </div>
 
-                 <div className="w-full bg-white/5 h-3 rounded-full overflow-hidden border border-white/5">
+                 <div className="w-full bg-white/5 h-3 rounded-full overflow-hidden border border-white/10 shadow-inner">
                     <div className={`h-full transition-all duration-1000 ${trafficStatus === 'FLUIDO' ? 'bg-emerald-500 w-full' : trafficStatus === 'MODERADO' ? 'bg-yellow-500 w-1/2' : 'bg-red-500 w-1/4'}`}></div>
                  </div>
               </div>
@@ -335,9 +330,9 @@ const App: React.FC = () => {
             
             <div className="grid grid-cols-4 gap-6">
                {APP_DATABASE.map(app => (
-                 <button key={app.id} onClick={() => window.open(app.id === 'whatsapp' ? app.scheme : app.scheme, '_blank')} className="bg-white/5 p-8 rounded-[40px] flex flex-col items-center gap-4 border border-white/5 active:scale-90 transition-all hover:bg-white/10 hover:border-cyan-500/30 shadow-xl">
+                 <button key={app.id} onClick={() => window.open(app.id === 'whatsapp' ? app.scheme : app.scheme, '_blank')} className="bg-white/5 p-8 rounded-[45px] flex flex-col items-center gap-4 border border-white/5 active:scale-90 transition-all hover:bg-white/10 hover:border-cyan-500/40 shadow-xl">
                     <i className={`${app.icon} ${app.color} text-4xl`}></i>
-                    <span className="text-[10px] font-black tracking-widest">{app.name}</span>
+                    <span className="text-[10px] font-black tracking-widest uppercase">{app.name}</span>
                  </button>
                ))}
             </div>
@@ -360,9 +355,15 @@ const App: React.FC = () => {
             onRouteUpdate={(steps, dur, dist) => setTravel(p => ({...p, drivingTimeMinutes: dur, totalDistanceKm: dist}))} 
          />
          
-         <div className="absolute bottom-14 left-14 z-[5000] bg-black/80 backdrop-blur-3xl p-16 rounded-[70px] border-2 border-cyan-500/30 flex flex-col items-center shadow-3xl scale-125">
-            <span className="text-[11rem] font-black leading-none tracking-tighter text-white">{currentSpeed}</span>
-            <span className="text-xl text-cyan-400 font-black mt-2 tracking-[0.8em]">KM/H REAL</span>
+         <div className="absolute bottom-16 left-16 z-[5000] bg-black/90 backdrop-blur-3xl p-16 rounded-[80px] border-2 border-cyan-500/30 flex flex-col items-center shadow-3xl scale-150 origin-bottom-left">
+            <span className="text-[12rem] font-black leading-none tracking-tighter text-white drop-shadow-[0_0_20px_rgba(255,255,255,0.3)]">{currentSpeed}</span>
+            <span className="text-2xl text-cyan-400 font-black mt-2 tracking-[1em]">KM/H REAL</span>
+         </div>
+         
+         {/* DRIVE CARE HUD ALERT */}
+         <div className="absolute top-12 left-1/2 -translate-x-1/2 z-[5000] bg-red-600/20 backdrop-blur-xl border border-red-500/50 px-10 py-4 rounded-full flex items-center gap-4 shadow-[0_0_40px_rgba(220,38,38,0.2)]">
+            <div className="w-3 h-3 bg-red-500 rounded-full animate-ping"></div>
+            <span className="text-xs font-black tracking-[0.4em] text-red-100">DIRIJA COM CUIDADO • EVA PANDORA V160</span>
          </div>
       </main>
 
@@ -370,9 +371,12 @@ const App: React.FC = () => {
           setTravel(p => ({ ...p, destination: n.toUpperCase(), destinationCoords: [la, ln], stops: [] }));
           setIsAddStopModalOpen(false);
       }} />
+      <SettingsMenu isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={{userName: 'Elivam', voiceVolume: 90, privacyMode: false, safetyDistance: 30, alertVoiceEnabled: true, preferredMusicApp: 'spotify', preferredVideoApp: 'stremio', credentials: []}} onUpdate={() => {}} mediaApps={APP_DATABASE} />
+      
       <style>{`
          @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
          .animate-shimmer { animation: shimmer 3s infinite linear; }
+         .shadow-3xl { box-shadow: 0 35px 60px -15px rgba(0, 0, 0, 0.9); }
       `}</style>
     </div>
   );
