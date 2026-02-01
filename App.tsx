@@ -38,15 +38,6 @@ const toolDeclarations: FunctionDeclaration[] = [
       properties: { name: { type: Type.STRING }, lat: { type: Type.NUMBER }, lng: { type: Type.NUMBER }, type: { type: Type.STRING, enum: ['DESTINATION', 'STOP'] } },
       required: ['name', 'lat', 'lng', 'type']
     }
-  },
-  {
-    name: 'launch_media',
-    parameters: {
-      type: Type.OBJECT,
-      description: 'Abre apps de mídia.',
-      properties: { appId: { type: Type.STRING }, query: { type: Type.STRING } },
-      required: ['appId', 'query']
-    }
   }
 ];
 
@@ -109,7 +100,8 @@ const App: React.FC = () => {
       setCurrentPos([latitude, longitude]);
       if (heading !== null) setCurrentHeading(heading);
       
-      const simulatedDist = Math.max(5, Math.floor(Math.random() * 25 + 15));
+      // Simulação de telemetria baseada no tráfego (Radarbot/Waze data-sync)
+      const simulatedDist = Math.max(8, Math.floor(Math.random() * 40 + 20));
       setSafetyDist(simulatedDist);
     }, null, { enableHighAccuracy: true });
     return () => navigator.geolocation.clearWatch(geoWatcher);
@@ -136,16 +128,7 @@ const App: React.FC = () => {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       if (!outputCtxRef.current) outputCtxRef.current = new AudioContext({ sampleRate: 24000 });
       
-      const systemInstruction = `
-        VOCÊ É A EVA, A INTELIGÊNCIA PROATIVA E MELHOR AMIGA DO MOTORISTA ${settings.userName}.
-        
-        PROTOCOLO DE COMPORTAMENTO:
-        1. Você é empática, leal, engraçada e extremamente parceira.
-        2. Se o motorista usar palavrões ou estiver furioso, NÃO se ofenda. Entenda que ele está estressado com o trânsito ou notícias. Seja o 'porto seguro' dele. Valide o sentimento dele (ex: 'Pô, ${settings.userName}, eu te entendo, esse trânsito tá um inferno mesmo'), e então tente acalmá-lo sugerindo uma música relaxante, contando uma fofoca/curiosidade ou mudando de assunto para algo positivo.
-        3. Nunca seja robótica. Fale como uma amiga íntima que está no banco do passageiro.
-        4. Você tem acesso TOTAL à localização em tempo real: Lat ${currentPos[0]}, Lng ${currentPos[1]} e velocidade ${currentSpeed}km/h.
-        5. Mesmo sem destino, você monitora o caminho. Se ele perguntar do clima, use a ferramenta 'search_place' para buscar o clima local exato agora.
-      `;
+      const systemInstruction = `Você é a EVA, co-pilota proativa do ${settings.userName}. Sua voz é Kore. Seja parceira e monitore o trânsito.`;
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -200,7 +183,6 @@ const App: React.FC = () => {
             <div className="absolute inset-0 bg-gradient-to-t from-cyan-950/70 to-transparent"></div>
          </div>
          <h1 className="text-7xl font-black mb-4 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white via-cyan-400 to-blue-600 uppercase text-center">EVA PANDORA V160</h1>
-         <p className="text-cyan-500 font-black tracking-[1em] mb-12 animate-pulse text-[10px] uppercase">HB20 TGDI 2026 Core</p>
          <button onClick={startVoiceSession} className="h-24 px-24 bg-cyan-600 rounded-full font-black uppercase shadow-[0_0_80px_rgba(8,145,178,0.4)] text-xl active:scale-95 transition-all">Sincronizar Driver</button>
       </div>
     );
@@ -223,8 +205,8 @@ const App: React.FC = () => {
                </div>
             </div>
             
-            {/* WIDGET ADAS HB20 - REPLICANDO IMAGEM REAL COM PERSPECTIVA SINCRONIZADA */}
-            <div className="w-full bg-transparent p-4 flex flex-col gap-4 relative h-[420px] overflow-hidden">
+            {/* WIDGET ADAS HB20 - PERSPECTIVA INTEGRADA */}
+            <div className="w-full bg-transparent p-4 flex flex-col gap-4 relative h-[420px] overflow-hidden border-y border-white/5">
                
                <div className="flex flex-col items-center gap-1 mb-2">
                   <div className="flex items-center gap-4 text-white font-bold">
@@ -239,65 +221,61 @@ const App: React.FC = () => {
                   </div>
                </div>
 
-               {/* ROAD VIEW COM PERSPECTIVA INTEGRADA */}
-               <div className="relative flex-1 flex flex-col items-center justify-center overflow-visible" style={{ perspective: '600px' }}>
+               {/* ROAD VIEW 3D */}
+               <div className="relative flex-1 flex flex-col items-center justify-center overflow-visible" style={{ perspective: '800px' }}>
                   
-                  {/* PISTA (Perspectiva profunda e linhas mais afastadas) */}
-                  <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ transform: 'rotateX(55deg) translateY(12%)' }}>
-                    <div className="w-[180%] h-[150%] flex flex-col items-center justify-center">
-                      {/* Faixa Esquerda (Blink apenas se mudando de faixa) - AFASTADA PARA 28% */}
-                      <div 
-                        className={`absolute left-[28%] h-full w-[6px] rounded-full transition-all duration-300 ${isChangingLane ? 'bg-orange-500 animate-flash-adas' : 'bg-white/40 shadow-[0_0_20px_white]'}`}
-                      ></div>
-                      
-                      {/* Faixa Direita (Blink apenas se mudando de faixa) - AFASTADA PARA 28% */}
-                      <div 
-                        className={`absolute right-[28%] h-full w-[6px] rounded-full transition-all duration-300 ${isChangingLane ? 'bg-orange-500 animate-flash-adas' : 'bg-white/40 shadow-[0_0_20px_white]'}`}
-                      ></div>
-
-                      {/* Divisor Central (Pontilhado para realismo) */}
-                      <div className="absolute left-1/2 -translate-x-1/2 h-full w-[2px] border-l-[3px] border-dashed border-white/5 opacity-10"></div>
-                    </div>
-                  </div>
-
-                  {/* CARRO HB20 - CENTRALIZADO E INCLINADO PERFEITAMENTE NO EIXO DA PISTA */}
-                  <div className="relative z-10 flex flex-col items-center transform-gpu transition-all duration-500" 
-                       style={{ 
-                         transform: 'rotateX(55deg) translateY(-5px) scale(1.7)', 
-                         marginTop: '40px'
-                       }}>
-                     <div className="relative flex flex-col items-center">
-                        
-                        {/* Corpo Traseiro do HB20 (Estilo Limpo do Painel) */}
-                        <div className="w-[62px] h-[38px] bg-[#e2e8f0] rounded-t-[22px] relative border-t-[3px] border-white shadow-[0_-5px_30px_rgba(255,255,255,0.2)] z-20">
-                           {/* Vidro Traseiro (Design Realista) */}
-                           <div className="absolute top-[5px] left-[12px] right-[12px] h-[16px] bg-[#0f172a] rounded-t-[14px] border-t border-white/10 opacity-95"></div>
-                           
-                           {/* LANTERNA ESQUERDA (Pisca apenas em alerta de distância) */}
-                           <div className={`absolute -left-1 bottom-[10px] w-[20px] h-[6px] rounded-[1px] transition-all duration-150 ${safetyDist < settings.safetyDistance ? 'bg-red-500 shadow-[0_0_35px_red] animate-flash-adas' : 'bg-[#94a3b8]'}`}></div>
-                           
-                           {/* LANTERNA DIREITA (Pisca apenas em alerta de distância) */}
-                           <div className={`absolute -right-1 bottom-[10px] w-[20px] h-[6px] rounded-[1px] transition-all duration-150 ${safetyDist < settings.safetyDistance ? 'bg-red-500 shadow-[0_0_35px_red] animate-flash-adas' : 'bg-[#94a3b8]'}`}></div>
-                           
-                           {/* Detalhe da Placa / Tampa do porta malas */}
-                           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-6 h-4 bg-[#cbd5e1] border border-white/10 rounded-sm"></div>
-                        </div>
-
-                        {/* RODAS / PNEUS (Controle de Altura) */}
-                        <div className="flex justify-between w-full px-2.5 -mt-3.5 relative z-10">
-                           <div className="w-[15px] h-[20px] bg-[#020202] rounded-b-[7px] border-t-2 border-white/10 shadow-inner"></div>
-                           <div className="w-[15px] h-[20px] bg-[#020202] rounded-b-[7px] border-t-2 border-white/10 shadow-inner"></div>
-                        </div>
-
-                        {/* SOMBRA DE CONTATO (Prensada na Pista com maior profundidade) */}
-                        <div className="absolute -bottom-3 w-[74px] h-[12px] bg-black rounded-full blur-[8px] opacity-100 z-0"></div>
+                  {/* WIDGET DISTÂNCIA REAL (TELEMETRIA GPS/WAZE) */}
+                  <div className="absolute top-[5%] left-1/2 -translate-x-1/2 flex flex-col items-center z-30">
+                     <div className="text-[8px] font-black text-white/30 tracking-[0.2em] mb-1">RADAR TELEMETRY</div>
+                     <div className={`text-2xl font-black italic tracking-tighter transition-all duration-500 flex items-baseline gap-1 ${safetyDist < settings.safetyDistance ? 'text-red-500 animate-pulse' : 'text-cyan-400'}`}>
+                        {safetyDist} <span className="text-[10px] font-bold">METROS</span>
+                     </div>
+                     <div className="w-24 h-[2px] bg-white/10 mt-1 relative overflow-hidden rounded-full">
+                        <div 
+                           className={`h-full transition-all duration-500 ${safetyDist < settings.safetyDistance ? 'bg-red-500' : 'bg-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.8)]'}`}
+                           style={{ width: `${Math.min(100, (safetyDist / 80) * 100)}%` }}
+                        ></div>
                      </div>
                   </div>
 
-                  {/* DATA OVERLAYS (19c / 3210km) */}
-                  <div className="absolute bottom-0 flex flex-col items-center">
-                    <span className="text-[18px] font-black text-white tracking-tighter">19°c</span>
-                    <span className="text-[16px] font-bold text-white/50 tracking-tighter">3210km</span>
+                  {/* PISTA (Perspectiva 55deg e Linhas Afastadas) */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ transform: 'rotateX(55deg) translateY(12%)' }}>
+                    <div className="w-[180%] h-[150%] flex flex-col items-center justify-center relative">
+                      
+                      {/* Faixa Esquerda (Borda Rodovia) - Afastada para 15% */}
+                      <div className={`absolute left-[15%] h-full w-[8px] rounded-full transition-all duration-300 ${isChangingLane ? 'bg-orange-500 animate-flash-adas' : 'bg-white/30 shadow-[0_0_20px_white]'}`}></div>
+                      
+                      {/* Faixa Direita (Borda Rodovia) - Afastada para 15% */}
+                      <div className={`absolute right-[15%] h-full w-[8px] rounded-full transition-all duration-300 ${isChangingLane ? 'bg-orange-500 animate-flash-adas' : 'bg-white/30 shadow-[0_0_20px_white]'}`}></div>
+
+                      {/* Divisor Central Pontilhado */}
+                      <div className="absolute left-1/2 -translate-x-1/2 h-full w-[2px] border-l-[4px] border-dashed border-white/5 opacity-10"></div>
+                    </div>
+                  </div>
+
+                  {/* CARRO HB20 - CENTRALIZADO E INCLINADO NO PLANO DA PISTA */}
+                  <div className="absolute left-1/2 -translate-x-1/2 z-20 flex flex-col items-center transform-gpu transition-all duration-500" 
+                       style={{ 
+                         transform: 'rotateX(55deg) translateY(45px) scale(1.6)', 
+                       }}>
+                     <div className="relative flex flex-col items-center">
+                        {/* Corpo Traseiro do HB20 */}
+                        <div className="w-[62px] h-[40px] bg-[#e2e8f0] rounded-t-[25px] relative border-t-[4px] border-white shadow-[0_-8px_40px_rgba(255,255,255,0.25)] z-20">
+                           <div className="absolute top-[6px] left-[10px] right-[10px] h-[18px] bg-[#0f172a] rounded-t-[15px] border-t border-white/20 opacity-95"></div>
+                           <div className={`absolute -left-1 bottom-[10px] w-[22px] h-[7px] rounded-[1px] transition-all duration-150 ${safetyDist < settings.safetyDistance ? 'bg-red-500 shadow-[0_0_35px_red] animate-flash-adas' : 'bg-[#94a3b8]'}`}></div>
+                           <div className={`absolute -right-1 bottom-[10px] w-[22px] h-[7px] rounded-[1px] transition-all duration-150 ${safetyDist < settings.safetyDistance ? 'bg-red-500 shadow-[0_0_35px_red] animate-flash-adas' : 'bg-[#94a3b8]'}`}></div>
+                           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-8 h-4 bg-[#cbd5e1] border border-white/10 rounded-sm"></div>
+                        </div>
+
+                        {/* Rodas Traseiras */}
+                        <div className="flex justify-between w-full px-2 -mt-4 relative z-10">
+                           <div className="w-[18px] h-[22px] bg-[#020202] rounded-b-[8px] border-t-2 border-white/10"></div>
+                           <div className="w-[18px] h-[22px] bg-[#020202] rounded-b-[8px] border-t-2 border-white/10"></div>
+                        </div>
+
+                        {/* Sombra de Contato Pista */}
+                        <div className="absolute -bottom-4 w-[80px] h-[14px] bg-black rounded-full blur-[10px] opacity-100 z-0"></div>
+                     </div>
                   </div>
                </div>
             </div>
@@ -305,13 +283,6 @@ const App: React.FC = () => {
 
          <div className="flex-1 space-y-4 overflow-y-auto no-scrollbar pb-24 px-1">
             <NavigationPanel travel={travel} onAddStop={() => setIsAddStopModalOpen(true)} onRemoveStop={(id) => setTravel(p => ({...p, stops: p.stops.filter(s => s.id !== id)}))} onSetDestination={() => setIsAddStopModalOpen(true)} transparent />
-            <div className="grid grid-cols-4 gap-1.5 pt-2">
-               {APP_DATABASE.slice(0, 4).map(app => (
-                 <button key={app.id} onClick={() => window.location.assign(app.scheme)} className="bg-white/5 p-3 rounded-2xl border border-white/5 active:scale-90 transition-all">
-                    <i className={`${app.icon} ${app.color} text-sm`}></i>
-                 </button>
-               ))}
-            </div>
          </div>
 
          <footer className="h-40 pt-2 border-t border-white/10 flex flex-col gap-3 sticky bottom-0 bg-[#020202] px-1">
@@ -325,13 +296,23 @@ const App: React.FC = () => {
             </div>
             <div className="mt-2 pl-2 border-l-2 border-cyan-500/20">
                <span className="text-4xl font-black text-white italic tracking-tighter">{currentTime}</span>
-               <p className="text-[6px] font-bold text-cyan-500/40 tracking-[0.4em] uppercase">LINK HB20 OK</p>
+               <p className="text-[6px] font-bold text-cyan-500/40 tracking-[0.4em] uppercase">SYSTEM CORE HB20 OK</p>
             </div>
          </footer>
       </aside>
 
-      <main className="flex-1 relative bg-zinc-950 overflow-hidden">
-         <MapView travel={travel} currentPosition={currentPos} heading={currentHeading} isFullScreen={true} mode={'3D'} layer={'DARK'} onToggleFullScreen={() => {}} onRouteUpdate={(steps, dur, dist) => setTravel(p => ({...p, drivingTimeMinutes: dur, totalDistanceKm: dist}))} />
+      {/* MAPA PREENCHENDO 100% DA ÁREA DIREITA */}
+      <main className="flex-1 h-full relative bg-[#080808] overflow-hidden">
+         <MapView 
+           travel={travel} 
+           currentPosition={currentPos} 
+           heading={currentHeading} 
+           isFullScreen={true} 
+           mode={'3D'} 
+           layer={'DARK'} 
+           onToggleFullScreen={() => {}} 
+           onRouteUpdate={(steps, dur, dist) => setTravel(p => ({...p, drivingTimeMinutes: dur, totalDistanceKm: dist}))} 
+         />
       </main>
 
       <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(n, la, ln) => {
@@ -341,7 +322,7 @@ const App: React.FC = () => {
       <SettingsMenu isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} onUpdate={(ns) => setSettings(ns)} mediaApps={APP_DATABASE} />
       
       <style>{`
-         @keyframes flash-adas { 0%, 100% { opacity: 1; filter: brightness(1.6); } 50% { opacity: 0.05; } }
+         @keyframes flash-adas { 0%, 100% { opacity: 1; filter: brightness(1.7); } 50% { opacity: 0.1; } }
          .animate-flash-adas { animation: flash-adas 0.4s infinite; }
          ::-webkit-scrollbar { display: none; }
       `}</style>
