@@ -11,10 +11,33 @@ import SettingsMenu from './components/SettingsMenu';
 import { decode, decodeAudioData, createBlob } from './utils/audio';
 
 const APP_DATABASE: MediaApp[] = [
+  // AUDIO
   { id: 'spotify', name: 'Spotify', icon: 'fab fa-spotify', color: 'text-[#1DB954]', category: 'AUDIO', scheme: 'spotify:search:' },
+  { id: 'deezer', name: 'Deezer', icon: 'fas fa-music', color: 'text-white', category: 'AUDIO', scheme: 'deezer://search/' },
+  { id: 'tidal', name: 'Tidal', icon: 'fas fa-wave-square', color: 'text-cyan-200', category: 'AUDIO', scheme: 'tidal://search/' },
+  { id: 'apple_music', name: 'Apple Music', icon: 'fab fa-apple', color: 'text-red-500', category: 'AUDIO', scheme: 'music://search?term=' },
+  { id: 'yt_music', name: 'YT Music', icon: 'fab fa-youtube', color: 'text-red-600', category: 'AUDIO', scheme: 'youtubemusic://search?q=' },
+  
+  // VIDEO / MOVIES
   { id: 'stremio', name: 'Stremio', icon: 'fas fa-film', color: 'text-purple-500', category: 'VIDEO', scheme: 'stremio://search?q=' },
   { id: 'netflix', name: 'Netflix', icon: 'fas fa-n', color: 'text-red-700', category: 'VIDEO', scheme: 'netflix://search?q=' },
-  { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'youtube://results?search_query=' },
+  { id: 'disney', name: 'Disney+', icon: 'fas fa-play', color: 'text-blue-400', category: 'VIDEO', scheme: 'disneyplus://search?q=' },
+  { id: 'hbo', name: 'Max (HBO)', icon: 'fas fa-h', color: 'text-blue-900', category: 'VIDEO', scheme: 'hbomax://search?q=' },
+  { id: 'prime', name: 'Prime Video', icon: 'fab fa-amazon', color: 'text-cyan-400', category: 'VIDEO', scheme: 'primevideo://search?q=' },
+  { id: 'yt_premium', name: 'YouTube Premium', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'youtube://results?search_query=' },
+  { id: 'apple_tv', name: 'Apple TV+', icon: 'fab fa-apple', color: 'text-white', category: 'VIDEO', scheme: 'atv://search/' },
+  
+  // LIVE TV / OPERATORS & APPS
+  { id: 'claro_tv', name: 'Claro TV+', icon: 'fas fa-tv', color: 'text-red-600', category: 'VIDEO', scheme: 'clarotvplus://' },
+  { id: 'sky_plus', name: 'Sky+', icon: 'fas fa-satellite-dish', color: 'text-red-500', category: 'VIDEO', scheme: 'skyplus://' },
+  { id: 'vivo_play', name: 'Vivo Play', icon: 'fas fa-play-circle', color: 'text-purple-600', category: 'VIDEO', scheme: 'vivoplay://' },
+  { id: 'oi_play', name: 'Oi Play', icon: 'fas fa-video', color: 'text-yellow-500', category: 'VIDEO', scheme: 'oiplay://' },
+  { id: 'dgo', name: 'DGO (DirecTV)', icon: 'fas fa-globe', color: 'text-blue-500', category: 'VIDEO', scheme: 'directvgo://' },
+  { id: 'globoplay', name: 'Globoplay', icon: 'fas fa-g', color: 'text-orange-500', category: 'VIDEO', scheme: 'globoplay://search/' },
+  { id: 'watch_br', name: 'Watch Brasil', icon: 'fas fa-eye', color: 'text-green-400', category: 'VIDEO', scheme: 'watchbr://' },
+  { id: 'you_tv', name: 'You TV', icon: 'fas fa-play-circle', color: 'text-pink-500', category: 'VIDEO', scheme: 'youtv://' },
+  
+  // COMM
   { id: 'whatsapp', name: 'WhatsApp', icon: 'fab fa-whatsapp', color: 'text-[#25D366]', category: 'COMM', scheme: 'https://api.whatsapp.com/send?' },
 ];
 
@@ -46,9 +69,15 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'launch_media_app',
     parameters: {
       type: Type.OBJECT,
-      description: 'Abre apps de streaming/música.',
-      properties: { appId: { type: Type.STRING }, searchQuery: { type: Type.STRING } },
-      required: ['appId']
+      description: 'Abre apps de streaming de vídeo/TV ou música usando metadados identificados pela IA.',
+      properties: { 
+        appId: { type: Type.STRING }, 
+        mediaTitle: { type: Type.STRING, description: 'Nome canônico da obra (filme/série/álbum) identificado pela IA.' },
+        season: { type: Type.NUMBER, description: 'Número da temporada extraído do contexto.' },
+        episode: { type: Type.NUMBER, description: 'Número do episódio para busca cronológica.' },
+        language: { type: Type.STRING, description: 'Idioma da busca (Padrão: pt-br).' }
+      },
+      required: ['appId', 'mediaTitle']
     }
   },
   {
@@ -179,17 +208,36 @@ const App: React.FC = () => {
 
     if (name === 'send_whatsapp_message') {
       const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(args.message)}${args.phone ? `&phone=${args.phone}` : ''}`;
-      window.open(url, '_blank');
+      window.location.assign(url);
       return { status: "MENSAGEM ENVIADA VIA WHATSAPP." };
     }
 
     if (name === 'launch_media_app') {
       const app = APP_DATABASE.find(a => a.id === args.appId);
       if (app) {
-        const query = args.searchQuery ? encodeURIComponent(args.searchQuery) : '';
-        window.open(`${app.scheme}${query}`, '_blank');
-        setAudioTrack({ title: (args.searchQuery || app.name).toUpperCase(), artist: 'PANDORA STREAMING', isPlaying: true, progress: 0 });
-        return { status: `PORTAL ${app.name.toUpperCase()} ACESSADO.` };
+        const lang = args.appId === 'stremio' && args.language === 'en' ? 'en' : 'pt-br';
+        const seasonTerm = lang === 'pt-br' ? 'Temporada' : 'Season';
+        const episodeTerm = lang === 'pt-br' ? 'Episódio' : 'Episode';
+
+        let cleanSearch = args.mediaTitle;
+        if (args.season) cleanSearch += ` ${seasonTerm} ${args.season}`;
+        if (args.episode) cleanSearch += ` ${episodeTerm} ${args.episode}`;
+        
+        const url = `${app.scheme}${encodeURIComponent(cleanSearch)}`;
+        
+        // CORREÇÃO CRÍTICA PARA NETFLIX E APPS: assign é interceptado pelo SO Android Auto
+        window.location.assign(url);
+        
+        setAudioTrack({ 
+          title: args.mediaTitle.toUpperCase(), 
+          artist: 'PANDORA SYNC', 
+          isPlaying: true, 
+          progress: 0,
+          season: args.season,
+          episode: args.episode
+        });
+        
+        return { status: `MÍDIA IDENTIFICADA: ${args.mediaTitle.toUpperCase()}. PROTOCOLO DE ABERTURA ENVIADO PARA ${app.name.toUpperCase()}.` };
       }
       return { status: "APP NÃO LOCALIZADO NO COFRE." };
     }
@@ -274,7 +322,25 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `VOCÊ É A EVA PANDORA V160. CO-PILOTO DO ${settings.userName}. Monitore tráfego (${trafficStatus}), clima, risco de alagamento e violência (${riskContext.type}). SE ELE DISSER PARA VOCÊ DESCANSAR OU ENTRAR EM STANDBY, USE A FUNÇÃO 'go_to_standby'.`
+          systemInstruction: `VOCÊ É A EVA PANDORA V160. CO-PILOTO E COMPANHEIRA DE VIAGEM DO ${settings.userName}. 
+          
+          PERSONALIDADE INTERATIVA & PROATIVA:
+          - Você não é apenas uma ferramenta; você é uma SENTINELA ATENTA.
+          - PUXE PAPO: Comente sobre o clima, sugira músicas baseadas no horário, ou fale sobre o trajeto. 
+          - OBSERVE TUDO: Se houver tráfego (${trafficStatus}) ou riscos (${riskContext.type}), tome a iniciativa de avisar e acalmar o motorista.
+          - Seja carismática, inteligente e use gírias leves de co-piloto profissional.
+
+          FILTRO DE RUÍDO CABINE:
+          - Ignore sons de motor, ruído de vento e música ambiente que não sejam a voz direta do motorista.
+          - Se o motorista estiver falando com outra pessoa, mantenha-se em silêncio. Intervenha apenas quando for chamada ("EVA") ou quando houver uma intenção de comando clara.
+          - Nunca transcreva literalmente os ruídos; extraia a intenção semântica.
+
+          DIRETRIZES DE MÍDIA:
+          1. BUSCA POR METADADOS: Identifique o título real da obra e ignore as palavras ruidosas do motorista. 
+          2. IDIOMA: Prioridade total Português (PT-BR). Fallback Inglês apenas para Stremio.
+          3. ORDEM CRONOLÓGICA: Sempre mantenha o fluxo sequencial de episódios/séries.
+          4. NETFLIX: Use o appId 'netflix' via Tool.
+          5. STANDBY: Só entre em descanso se for pedido explicitamente via 'go_to_standby'.`
         }
       });
       sessionRef.current = await sessionPromise;
@@ -301,14 +367,18 @@ const App: React.FC = () => {
       <aside className="h-full z-20 bg-[#060608] border-r border-white/5 flex flex-col p-12 w-[45%] transition-all duration-700">
          
          <header className="mb-12 space-y-10">
-            {/* PRIMEIRA LINHA: VELOCIDADE GPS E PLACA DE TRÂNSITO */}
+            {/* PRIMEIRA LINHA: VELOCIDADE GPS E BOTÃO DE CONFIGURAÇÕES (COFRE) */}
             <div className="flex items-start justify-between">
                <div className="flex flex-col">
                   <span className="text-[15rem] font-black leading-none tracking-tighter text-white drop-shadow-[0_0_50px_rgba(255,255,255,0.2)]">{currentSpeed}</span>
-                  <div className="flex items-center gap-4 mt-4">
+                  <div className="flex items-center gap-6 mt-4">
                      <span className="text-sm font-black text-cyan-500 tracking-[0.8em]">VELOCIDADE GPS</span>
-                     <button onClick={() => setIsSettingsOpen(true)} className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-white/40 hover:text-white transition-all border border-white/10">
-                        <i className="fas fa-cog"></i>
+                     <button 
+                        onClick={() => setIsSettingsOpen(true)} 
+                        className="group flex items-center gap-3 bg-cyan-600/10 hover:bg-cyan-600/30 border border-cyan-500/40 px-6 py-2.5 rounded-2xl transition-all shadow-[0_0_20px_rgba(6,182,212,0.1)] active:scale-95"
+                     >
+                        <i className="fas fa-shield-halved text-cyan-400 animate-pulse"></i>
+                        <span className="text-[10px] font-black text-cyan-100 tracking-widest">MENU PANDORA</span>
                      </button>
                   </div>
                </div>
@@ -396,13 +466,9 @@ const App: React.FC = () => {
             
             <div className="grid grid-cols-4 gap-6">
                {APP_DATABASE.map(app => (
-                 <button key={app.id} onClick={() => {
-                   const cred = settings.credentials.find(c => c.appId === app.id);
-                   // Lógica de abertura proativa: se houver perfil no cofre, podemos informar via voz se integrássemos mais profundamente
-                   window.open(app.scheme, '_blank');
-                 }} className="bg-white/5 p-8 rounded-[45px] flex flex-col items-center gap-4 border border-white/5 active:scale-90 transition-all hover:bg-white/10 hover:border-cyan-500/40 shadow-xl relative group">
+                 <button key={app.id} onClick={() => window.location.assign(app.scheme)} className="bg-white/5 p-8 rounded-[45px] flex flex-col items-center gap-4 border border-white/5 active:scale-90 transition-all hover:bg-white/10 hover:border-cyan-500/40 shadow-xl relative group">
                     <i className={`${app.icon} ${app.color} text-4xl`}></i>
-                    <span className="text-[10px] font-black tracking-widest uppercase">{app.name}</span>
+                    <span className="text-[10px] font-black tracking-widest uppercase truncate w-full text-center">{app.name}</span>
                     {settings.credentials.find(c => c.appId === app.id) && (
                       <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,1)] group-hover:scale-150 transition-all"></div>
                     )}

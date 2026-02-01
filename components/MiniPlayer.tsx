@@ -19,9 +19,16 @@ const MiniPlayer: React.FC<MiniPlayerProps> = ({ app, metadata, onControl, trans
        </div>
        
        <div className="flex-1 min-w-0 flex flex-col justify-center">
-          <h4 className="text-[15px] font-black text-white truncate italic uppercase tracking-tighter">
-             {metadata.title}
-          </h4>
+          <div className="flex items-center gap-2">
+            <h4 className="text-[15px] font-black text-white truncate italic uppercase tracking-tighter">
+               {metadata.title}
+            </h4>
+            {(metadata.season || metadata.episode) && (
+              <span className="px-2 py-0.5 bg-blue-600 rounded text-[9px] font-black text-white">
+                S{metadata.season?.toString().padStart(2, '0')} E{metadata.episode?.toString().padStart(2, '0')}
+              </span>
+            )}
+          </div>
           <span className="text-[10px] font-bold text-white/40 tracking-widest uppercase mt-0.5 truncate">
              {metadata.artist} • EVA SYNC
           </span>

@@ -26,7 +26,6 @@ export interface StopInfo {
   coords: [number, number];
 }
 
-// Fix: Added missing StopRecommendation interface for RecommendationCard component
 export interface StopRecommendation {
   id?: string;
   name: string;
@@ -50,6 +49,9 @@ export interface TrackMetadata {
   artist: string;
   isPlaying: boolean;
   progress: number;
+  // Campos para séries e episódios
+  season?: number;
+  episode?: number;
 }
 
 export interface MediaApp {
@@ -61,7 +63,6 @@ export interface MediaApp {
   scheme: string;
 }
 
-// Fix: Added missing StreamingCredential interface for SettingsMenu component
 export interface StreamingCredential {
   appId: string;
   user: string;
@@ -77,11 +78,9 @@ export interface AppSettings {
   alertVoiceEnabled: boolean;
   preferredMusicApp: string;
   preferredVideoApp: string;
-  // Fix: Updated credentials from any[] to StreamingCredential[]
   credentials: StreamingCredential[];
 }
 
-// Fix: Added missing MeetingInfo interface for MeetingView component
 export interface MeetingInfo {
   id: string;
   title: string;
@@ -89,10 +88,8 @@ export interface MeetingInfo {
   attendees?: string[];
 }
 
-// Fix: Added missing CarAction type for BluelinkPanel component
 export type CarAction = 'LOCK' | 'UNLOCK' | 'START' | 'STOP' | 'WINDOWS_UP' | 'WINDOWS_DOWN' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
 
-// Fix: Added missing CarStatus interface for BluelinkPanel component
 export interface CarStatus {
   isLocked: boolean;
   isEngineRunning: boolean;
