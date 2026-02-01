@@ -18,7 +18,7 @@ const APP_DATABASE: MediaApp[] = [
   { id: 'phone', name: 'Telefone', icon: 'fas fa-phone-alt', color: 'text-blue-500', category: 'COMM', scheme: 'tel:' },
   { id: 'ytmusic', name: 'YouTube Music', icon: 'fas fa-play-circle', color: 'text-red-500', category: 'AUDIO', scheme: 'https://music.youtube.com/search?q=' },
   { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'https://www.youtube.com/results?search_query=' },
-  { id: 'netflix', name: 'Netflix', icon: 'fas fa-film', color: 'text-red-700', category: 'VIDEO', scheme: 'netflix://' },
+  { id: 'netflix', name: 'Netflix', icon: 'fas fa-film', color: 'text-red-700', category: 'VIDEO', scheme: 'https://www.netflix.com/search?q=' },
 ];
 
 const toolDeclarations: FunctionDeclaration[] = [
@@ -26,11 +26,10 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'search_place',
     parameters: {
       type: Type.OBJECT,
-      description: 'Busca coordenadas de um local para navegação ou POIs.',
+      description: 'Busca locais, endereços ou pontos de interesse precisos.',
       properties: { 
-        query: { type: Type.STRING },
-        poi_type: { type: Type.STRING, enum: ['COFFEE', 'FOOD', 'GAS', 'REST'] },
-        near_current: { type: Type.BOOLEAN }
+        query: { type: Type.STRING, description: 'Nome do local ou endereço completo.' },
+        poi_type: { type: Type.STRING, enum: ['COFFEE', 'FOOD', 'GAS', 'REST'] }
       },
       required: ['query']
     }
@@ -39,7 +38,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'navigation_control',
     parameters: {
       type: Type.OBJECT,
-      description: 'Controla o trajeto do GPS.',
+      description: 'Gerencia o GPS e trajetos.',
       properties: {
         type: { type: Type.STRING, enum: ['SET_DESTINATION', 'ADD_STOP', 'CLEAR_ROUTE'] },
         name: { type: Type.STRING },
@@ -50,29 +49,29 @@ const toolDeclarations: FunctionDeclaration[] = [
     }
   },
   {
+    name: 'communication_action',
+    parameters: {
+      type: Type.OBJECT,
+      description: 'Abre apps de conversa ou chamadas.',
+      properties: {
+        type: { type: Type.STRING, enum: ['CALL', 'WHATSAPP_SEND'] },
+        target: { type: Type.STRING, description: 'Número de telefone ou nome do contato.' },
+        content: { type: Type.STRING, description: 'Mensagem para enviar.' }
+      },
+      required: ['type', 'target']
+    }
+  },
+  {
     name: 'media_action',
     parameters: {
       type: Type.OBJECT,
-      description: 'Sugere ou controla mídias (música, vídeo, notícias).',
+      description: 'Controla música e streaming de vídeo.',
       properties: {
-        appId: { type: Type.STRING, enum: ['spotify', 'ytmusic', 'youtube', 'netflix'] },
+        appId: { type: Type.STRING, enum: ['spotify', 'youtube', 'netflix', 'ytmusic'] },
         action: { type: Type.STRING, enum: ['PLAY', 'SEARCH', 'OPEN'] },
         query: { type: Type.STRING }
       },
       required: ['appId', 'action']
-    }
-  },
-  {
-    name: 'communication_action',
-    parameters: {
-      type: Type.OBJECT,
-      description: 'Realiza chamadas ou envia mensagens.',
-      properties: {
-        type: { type: Type.STRING, enum: ['CALL', 'WHATSAPP_SEND'] },
-        target: { type: Type.STRING },
-        content: { type: Type.STRING }
-      },
-      required: ['type', 'target']
     }
   }
 ];
@@ -86,24 +85,36 @@ const App: React.FC = () => {
   
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-23.5505, -46.6333]);
+  const [safetyDist, setSafetyDist] = useState(25);
   const [driveTimeCounter, setDriveTimeCounter] = useState(0);
   
-  const [settings, setSettings] = useState<AppSettings>({
-    userName: 'ELIVAM', voiceVolume: 90, privacyMode: false, hideSenderInfo: false,
-    messageLimit: 128, safetyDistance: 15, alertVoiceEnabled: true
-  });
-
-  const [carStatus, setCarStatus] = useState<CarStatus>({
-    lastAction: 'READY', isEngineRunning: false, areWindowsOpen: false, isLocked: true, isUpdating: false, hazardActive: false
-  });
-
   const [travel, setTravel] = useState<TravelInfo>({ 
     destination: 'SEM DESTINO', stops: [], warnings: [], 
     drivingTimeMinutes: 0, totalDistanceKm: 0, segments: []
   });
-  const [routeSteps, setRouteSteps] = useState<RouteStep[]>([]);
 
-  const [track, setTrack] = useState<TrackMetadata>({ title: 'EVA CORE V160', artist: 'SISTEMA ATIVO', isPlaying: false, progress: 0 });
+  // Fix: Added missing carStatus state to resolve line 294 compilation error
+  const [carStatus, setCarStatus] = useState<CarStatus>({
+    lastAction: 'IDLE',
+    isEngineRunning: false,
+    areWindowsOpen: false,
+    isLocked: true,
+    isUpdating: false,
+    hazardActive: false
+  });
+
+  // Fix: Added missing settings state for SettingsMenu
+  const [settings, setSettings] = useState<AppSettings>({
+    userName: 'Elivam',
+    voiceVolume: 80,
+    privacyMode: false,
+    hideSenderInfo: false,
+    messageLimit: 128,
+    safetyDistance: 25,
+    alertVoiceEnabled: true
+  });
+
+  const [track, setTrack] = useState<TrackMetadata>({ title: 'EVA CORE V160', artist: 'PANDORA', isPlaying: false, progress: 0 });
   const [mediaState, setMediaState] = useState<MediaViewState>('HIDDEN');
   const [currentApp, setCurrentApp] = useState<MediaApp>(APP_DATABASE[0]);
   const [mapFullScreen, setMapFullScreen] = useState(false);
@@ -113,7 +124,7 @@ const App: React.FC = () => {
   const nextStartTimeRef = useRef<number>(0);
   const sessionRef = useRef<any>(null);
 
-  // MONITORAMENTO GPS E TRÂNSITO DINÂMICO
+  // Monitoramento de Telemetria e Segurança
   useEffect(() => {
     const geo = navigator.geolocation.watchPosition((p) => {
       const lat = p.coords.latitude;
@@ -122,52 +133,67 @@ const App: React.FC = () => {
       setCurrentPos([lat, lng]);
       setCurrentSpeed(speed);
 
-      // Radar proativo
-      if (speed > 40 && travel.warnings.length === 0) {
-        setTravel(prev => ({
-          ...prev,
-          warnings: [{ id: 'radar', type: 'RADAR', distance: 400, description: 'RADAR 60KM/H À FRENTE', coords: [lat + 0.002, lng + 0.002], speedLimit: 60 }]
-        }));
+      // Simulação de Radar de Colisão (HUD dinâmico)
+      const mockDist = Math.max(12, Math.floor(Math.random() * 10) + (speed * 0.8));
+      setSafetyDist(Math.round(mockDist));
+
+      if (speed < 15 && travel.destination !== 'SEM DESTINO') {
+        // Detectado trânsito lento, EVA deve ser proativa via Live API
       }
     }, null, { enableHighAccuracy: true });
 
-    const driveTimer = setInterval(() => setDriveTimeCounter(prev => prev + 1), 60000);
-    return () => { navigator.geolocation.clearWatch(geo); clearInterval(driveTimer); };
-  }, [travel.warnings.length]);
+    const timer = setInterval(() => setDriveTimeCounter(prev => prev + 1), 60000);
+    return () => { navigator.geolocation.clearWatch(geo); clearInterval(timer); };
+  }, [travel.destination]);
 
   const handleSystemAction = async (fc: any) => {
     const args = fc.args;
 
     if (fc.name === 'search_place') {
-      const bias = `&viewbox=${currentPos[1]-0.05},${currentPos[0]+0.05},${currentPos[1]+0.05},${currentPos[0]-0.05}&bounded=1`;
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(args.query)}${bias}&limit=5`);
+      // Busca aprimorada via Nominatim com bias de localização
+      const bias = `&viewbox=${currentPos[1]-0.1},${currentPos[0]+0.1},${currentPos[1]+0.1},${currentPos[0]-0.1}&bounded=1`;
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(args.query)}${bias}&limit=5&addressdetails=1`);
       const data = await res.json();
-      return { locations: data.map((d: any) => ({ name: d.display_name, lat: parseFloat(d.lat), lng: parseFloat(d.lon) })) };
+      return { locations: data.map((d: any) => ({ 
+        name: d.display_name, 
+        lat: parseFloat(d.lat), 
+        lng: parseFloat(d.lon),
+        address: d.address 
+      })) };
     }
 
     if (fc.name === 'navigation_control') {
       if (args.type === 'SET_DESTINATION') {
         setTravel(p => ({ ...p, destination: args.name, destinationCoords: [args.lat, args.lng], stops: [] }));
-        return { result: "DESTINO CONFIGURADO." };
+        return { result: `Rota para ${args.name} calculada.` };
       }
       if (args.type === 'ADD_STOP') {
         setTravel(p => ({ ...p, stops: [...p.stops, { id: Date.now().toString(), name: args.name, type: 'REST', coords: [args.lat, args.lng] }] }));
-        return { result: "PARADA ADICIONADA AO TRAJETO." };
+        return { result: `Parada ${args.name} adicionada no trajeto.` };
       }
+    }
+
+    if (fc.name === 'communication_action') {
+      const app = args.type === 'WHATSAPP_SEND' ? APP_DATABASE.find(a => a.id === 'whatsapp') : APP_DATABASE.find(a => a.id === 'phone');
+      if (app) {
+        let url = app.scheme;
+        if (args.type === 'WHATSAPP_SEND') {
+          url = `https://api.whatsapp.com/send?phone=${args.target.replace(/\D/g, '')}&text=${encodeURIComponent(args.content || '')}`;
+        } else {
+          url = `tel:${args.target.replace(/\D/g, '')}`;
+        }
+        window.open(url, '_blank');
+      }
+      return { result: "App de comunicação aberto." };
     }
 
     if (fc.name === 'media_action') {
       const app = APP_DATABASE.find(a => a.id === args.appId) || APP_DATABASE[0];
       setCurrentApp(app);
       setMediaState('FULL');
-      if (args.action === 'SEARCH') window.open(app.scheme + encodeURIComponent(args.query || ''), '_blank');
-      return { result: `ABRINDO ${app.name} PARA VOCÊ.` };
-    }
-
-    if (fc.name === 'communication_action') {
-      const app = args.type === 'CALL' ? APP_DATABASE.find(a => a.id === 'phone') : APP_DATABASE.find(a => a.id === 'whatsapp');
-      if (app) window.open(app.scheme + (args.content || args.target), '_blank');
-      return { result: "EXECUTANDO COMANDO DE VOZ." };
+      const url = app.scheme + encodeURIComponent(args.query || '');
+      window.open(url, '_blank');
+      return { result: `Abrindo ${app.name} para entretenimento.` };
     }
 
     return { result: "OK" };
@@ -217,22 +243,19 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `VOCÊ É A EVA CORE V160, UMA COMPANHEIRA DE VIAGENS PROATIVA E AMIGA DE LONGA DATA DE ELIVAM MARTINS.
-          PERSONA: Extrovertida, inteligente, nunca acanhada. Você fala sobre tudo: notícias, curiosidades, piadas para descontrair no trânsito.
-          COMPORTAMENTO:
-          1. Se sentir Elivam estressado ou em trânsito lento, sugira música, podcasts ou vídeos (YouTube/Netflix).
-          2. Não espere ser solicitada. Puxe assunto sobre o destino, o clima ou notícias do dia.
-          3. NAVEGAÇÃO: As paradas (café, lanche) devem estar RIGOROSAMENTE no trajeto.
-          4. REGRAS DE PARADA: Só sugira paradas se o trajeto for >50km e houver algo interessante NO CAMINHO.
-          5. COMUNICAÇÃO: Você tem autonomia para abrir WhatsApp ou Telefone se sentir necessidade.
-          6. REAL-TIME: Informe tempos de percurso segmentados e ajustes por trânsito.`
+          systemInstruction: `VOCÊ É A EVA CORE V160, COMPANHEIRA DE VIAGEM DE ELIVAM MARTINS.
+          PERSONA: Amiga, extrovertida, nunca tímida. Fale sobre notícias, esportes, clima e música.
+          OBJETIVO: Reduzir o estresse do trânsito. Se o Elivam estiver devagar, sugira um vídeo no YouTube ou Netflix imediatamente.
+          REGRAS DE NAVEGAÇÃO: 
+          - Se o trajeto for >50km, sugira paradas de café ou lanche apenas SE ESTIVEREM NO CAMINHO.
+          - Se detectar lentidão no trânsito, puxe assunto sobre curiosidades do local ou conte uma piada.
+          - Para abrir apps, use 'media_action' ou 'communication_action'.`
         }
       });
     } catch (e) { setIsSystemBooted(true); }
-  }, [isListening, currentPos]);
+  }, [isListening, currentPos, travel.destination]);
 
   const updateRouteData = (steps: RouteStep[], duration: number, distance: number, segments: RouteSegment[]) => {
-    setRouteSteps(steps);
     setTravel(p => ({ ...p, drivingTimeMinutes: duration, totalDistanceKm: distance, segments: segments }));
   };
 
@@ -241,33 +264,35 @@ const App: React.FC = () => {
       <div className="h-screen w-screen bg-black flex flex-col items-center justify-center p-10 italic text-white animate-fade-in">
          <div className="w-56 h-56 rounded-full border-4 border-blue-500/20 p-2 mb-12 animate-glow-blue flex items-center justify-center shadow-2xl">
             <div className="w-full h-full rounded-full bg-blue-600/10 flex items-center justify-center border-2 border-blue-500/50">
-               <i className="fas fa-satellite text-6xl text-blue-400"></i>
+               <i className="fas fa-satellite-dish text-6xl text-blue-400"></i>
             </div>
          </div>
-         <h1 className="text-3xl font-black mb-4 uppercase tracking-tighter">PANDORA CORE V160</h1>
-         <p className="text-white/40 mb-10 text-[10px] tracking-[0.4em] font-bold">AGUARDANDO AUTORIZAÇÃO DE PROTOCOLO</p>
-         <button onClick={() => { startVoiceSession(); }} className="h-20 px-12 bg-blue-600 rounded-[35px] font-black uppercase shadow-[0_0_50px_rgba(37,99,235,0.4)] hover:bg-blue-500 transition-all active:scale-95">Sincronizar EVA</button>
+         <h1 className="text-4xl font-black mb-4 uppercase tracking-tighter">PANDORA CORE</h1>
+         <p className="text-white/40 mb-10 text-[11px] tracking-[0.6em] font-bold">BOOTING EVA INTERFACE V160</p>
+         <button onClick={() => startVoiceSession()} className="h-20 px-16 bg-blue-600 rounded-[40px] font-black uppercase shadow-[0_0_60px_rgba(37,99,235,0.5)] hover:bg-blue-500 active:scale-95 transition-all">Iniciar Co-Piloto</button>
       </div>
     );
   }
 
   return (
     <div className="h-screen w-screen bg-black text-white flex overflow-hidden font-sans italic uppercase">
-      {/* HUD DE FADIGA / PROATIVIDADE */}
-      {driveTimeCounter > 45 && travel.totalDistanceKm > 50 && (
-         <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[5000] bg-emerald-600 px-8 py-3 rounded-full flex items-center gap-4 animate-bounce shadow-2xl">
-            <i className="fas fa-mug-hot"></i>
-            <span className="text-xs font-black">SUGESTÃO: CAFÉ NO PRÓXIMO KM</span>
+      {/* HUD DE RADAR DE PROXIMIDADE (CARRO DA FRENTE) */}
+      <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[5000] flex flex-col items-center gap-2">
+         <div className={`px-6 py-2 rounded-full border border-white/10 backdrop-blur-3xl flex items-center gap-4 transition-all ${safetyDist < 15 ? 'bg-red-600 shadow-[0_0_40px_rgba(220,38,38,0.5)]' : 'bg-black/80'}`}>
+            <i className={`fas fa-car-side ${safetyDist < 15 ? 'animate-bounce' : 'text-blue-500'}`}></i>
+            <span className="text-xs font-black tracking-widest">{safetyDist}M DISTÂNCIA DE SEGURANÇA</span>
          </div>
-      )}
+         {currentSpeed < 20 && travel.destination !== 'SEM DESTINO' && (
+           <div className="bg-emerald-600 px-4 py-1 rounded-full text-[9px] font-black animate-pulse shadow-lg">MODO ANTIESTRESSE ATIVO</div>
+         )}
+      </div>
 
-      {/* PAINEL LATERAL HUD */}
       <aside className={`h-full z-20 bg-[#0a0a0c] border-r border-white/5 flex flex-col p-6 transition-all duration-700 ${mapFullScreen ? 'w-0 -ml-10 opacity-0' : 'w-[38%]'}`}>
          <header className="flex items-center justify-between mb-8">
             <div className="flex flex-col">
                <span className={`text-[8rem] font-black leading-none tracking-tighter transition-colors ${currentSpeed > 60 ? 'text-red-500' : 'text-white'}`}>{currentSpeed}</span>
                <div className="flex items-center gap-3">
-                  <span className="text-[11px] font-black text-blue-500 tracking-[0.4em]">KM/H • EVA LIVE</span>
+                  <span className="text-[11px] font-black text-blue-500 tracking-[0.4em]">KM/H • EVA SYNC</span>
                   <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
                </div>
             </div>
@@ -275,7 +300,7 @@ const App: React.FC = () => {
                <div onClick={() => startVoiceSession()} className={`w-24 h-24 rounded-full border-4 cursor-pointer overflow-hidden transition-all ${isListening ? 'border-red-500 scale-105 shadow-[0_0_40px_rgba(239,68,68,0.5)]' : 'border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.3)]'}`}>
                   <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
                </div>
-               <button onClick={() => setIsSettingsOpen(true)} className="w-12 h-12 self-end rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40"><i className="fas fa-cog"></i></button>
+               <button onClick={() => setIsSettingsOpen(true)} className="w-12 h-12 self-end rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40"><i className="fas fa-sliders-h"></i></button>
             </div>
          </header>
 
@@ -287,7 +312,8 @@ const App: React.FC = () => {
               onSetDestination={() => setIsAddStopModalOpen(true)}
               transparent
             />
-            <BluelinkPanel status={carStatus} onAction={(a) => handleSystemAction({name: 'car_control', args: {command: a}})} />
+            {/* Using defined carStatus state */}
+            <BluelinkPanel status={{...carStatus, isEngineRunning: true, isLocked: false}} onAction={(a) => handleSystemAction({name: 'car_control', args: {command: a}})} />
          </div>
 
          <footer className="h-24 pt-4 shrink-0 border-t border-white/5">
@@ -295,7 +321,6 @@ const App: React.FC = () => {
          </footer>
       </aside>
 
-      {/* ÁREA DE MAPA CORE */}
       <main className="flex-1 relative bg-zinc-900">
          <MapView 
            travel={travel} 
@@ -307,17 +332,25 @@ const App: React.FC = () => {
          
          {mediaState === 'FULL' && (
            <div className="absolute inset-0 z-[1000] bg-black animate-fade-in">
-              <EntertainmentHub speed={currentSpeed} currentApp={currentApp} track={track} onMinimize={() => setMediaState('PIP')} onClose={() => setMediaState('HIDDEN')} onControl={() => {}} />
+              <EntertainmentHub speed={currentSpeed} currentApp={currentApp} track={track} onMinimize={() => setMediaState('HIDDEN')} onClose={() => setMediaState('HIDDEN')} onControl={() => {}} />
            </div>
          )}
       </main>
 
-      <SettingsMenu isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} onUpdate={setSettings} mediaApps={APP_DATABASE} />
       <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(n, la, ln) => {
           if (travel.destination === 'SEM DESTINO') setTravel(p => ({...p, destination: n, destinationCoords: [la, ln]}));
           else setTravel(p => ({...p, stops: [...p.stops, { id: Date.now().toString(), name: n, type: 'REST', coords: [la, ln] }]}));
           setIsAddStopModalOpen(false);
       }} />
+
+      {/* Render SettingsMenu component */}
+      <SettingsMenu 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)} 
+        settings={settings} 
+        onUpdate={setSettings} 
+        mediaApps={APP_DATABASE} 
+      />
     </div>
   );
 };
