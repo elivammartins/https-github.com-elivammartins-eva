@@ -26,7 +26,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'search_place',
     parameters: {
       type: Type.OBJECT,
-      description: 'Localiza endereços detalhados em Brasília (Quadras, Conjuntos) usando Google Maps.',
+      description: 'Localiza qualquer endereço em Brasília/Gama usando base do Google. Essencial para Quadras e Conjuntos.',
       properties: { query: { type: Type.STRING } },
       required: ['query']
     }
@@ -35,7 +35,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'media_action',
     parameters: {
       type: Type.OBJECT,
-      description: 'Controle de entretenimento nativo.',
+      description: 'Abre apps nativos (Spotify, Netflix, YouTube).',
       properties: {
         appId: { type: Type.STRING, enum: ['spotify', 'youtube', 'netflix', 'ytmusic'] },
         action: { type: Type.STRING, enum: ['SEARCH_AND_PLAY', 'OPEN_APP'] },
@@ -65,7 +65,7 @@ const App: React.FC = () => {
     lastAction: 'IDLE', isEngineRunning: true, areWindowsOpen: false, isLocked: false, isUpdating: false, hazardActive: false
   });
 
-  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'EVA V160 READY', artist: 'PANDORA CORE', isPlaying: false, progress: 0 });
+  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'BASE GOOGLE ATIVA', artist: 'SISTEMA EVA V160', isPlaying: false, progress: 0 });
   const [videoTrack, setVideoTrack] = useState<TrackMetadata>({ title: 'STANDBY', artist: 'STREAM ENGINE', isPlaying: false, progress: 0 });
   const [mediaState, setMediaState] = useState<MediaViewState>('HIDDEN');
   const [currentAudioApp, setCurrentAudioApp] = useState<MediaApp>(APP_DATABASE[0]);
@@ -91,28 +91,34 @@ const App: React.FC = () => {
 
     if (fc.name === 'search_place') {
       try {
+        // Busca com Google Search Grounding - O único que encontra casas em Brasília
         const response = await ai.models.generateContent({
           model: 'gemini-3-flash-preview',
-          contents: `Encontre a localização exata no Google Maps: "${args.query}, Brasília, DF". Retorne apenas o nome oficial do lugar e as coordenadas lat/lng em um formato legível por humanos.`,
-          config: { tools: [{ googleMaps: {} }] }
+          contents: `Qual a latitude e longitude exata de: "${args.query}, Brasília, DF, Brasil"? Responda no formato: NOME: [Nome do Local], LAT: [Lat], LNG: [Lng].`,
+          config: { tools: [{ googleSearch: {} }] }
         });
 
-        // Tenta extrair coordenadas da resposta de texto da IA como fallback se o grounding chunks não vierem
         const text = response.text || "";
         const latMatch = text.match(/(-?\d+\.\d+)/g);
         
         if (latMatch && latMatch.length >= 2) {
-          return { name: args.query.toUpperCase(), lat: parseFloat(latMatch[0]), lng: parseFloat(latMatch[1]) };
+          const lat = parseFloat(latMatch[0]);
+          const lng = parseFloat(latMatch[1]);
+          // Filtro de segurança para garantir que estamos no DF (aprox)
+          if (lat < -15 && lat > -17 && lng < -47 && lng > -49) {
+            return { name: args.query.toUpperCase(), lat, lng };
+          }
         }
 
-        // Fallback geográfico
-        const localRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(args.query + ' Brasília DF')}&limit=1&countrycodes=br`);
+        // Ultimo recurso: Nominatim reforçado
+        const localRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(args.query + ' Distrito Federal Brasil')}&limit=1&countrycodes=br`);
         const data = await localRes.json();
-        if (data[0]) return { name: data[0].display_name.split(',')[0], lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+        if (data && data[0]) return { name: data[0].display_name.split(',')[0], lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
         
-        return { error: "Localização não detectada. Tente citar um ponto de referência." };
+        return { error: "Localização não encontrada nem na base Google. Verifique o endereço." };
       } catch (err) {
-        return { error: "Erro na triangulação de satélites." };
+        console.error("Search Action Error:", err);
+        return { error: "Erro de comunicação com satélites de busca." };
       }
     }
 
@@ -126,7 +132,7 @@ const App: React.FC = () => {
         setCurrentAudioApp(app); setAudioTrack({ title: query, artist: app.name, isPlaying: true, progress: 0 });
       }
       window.open(app.scheme + encodeURIComponent(query), '_blank');
-      return { result: "Navegação de mídia disparada." };
+      return { result: "Aplicativo aberto." };
     }
 
     return { result: "OK" };
@@ -148,14 +154,21 @@ const App: React.FC = () => {
             const source = inputCtx.createMediaStreamSource(stream);
             const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
             scriptProcessor.onaudioprocess = (e) => { 
-              sessionPromise.then(s => { sessionRef.current = s; s.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) }); }); 
+              sessionPromise.then(s => { 
+                sessionRef.current = s; 
+                s.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) }); 
+              }).catch(() => { /* Previne erro se fechar rápido */ }); 
             };
             source.connect(scriptProcessor); scriptProcessor.connect(inputCtx.destination);
           },
           onmessage: async (msg: LiveServerMessage) => {
             if (msg.toolCall) {
               for (const fc of msg.toolCall.functionCalls) {
-                const res = await handleSystemAction(fc);
+                // Timeout de segurança para evitar travamento da IA
+                const actionPromise = handleSystemAction(fc);
+                const timeoutPromise = new Promise(res => setTimeout(() => res({ error: "TEMPO EXCEDIDO" }), 10000));
+                
+                const res: any = await Promise.race([actionPromise, timeoutPromise]);
                 sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: res } }));
               }
             }
@@ -165,7 +178,10 @@ const App: React.FC = () => {
               const buffer = await decodeAudioData(decode(audio), outputCtxRef.current, 24000, 1);
               const source = outputCtxRef.current.createBufferSource();
               source.buffer = buffer; source.connect(outputCtxRef.current.destination);
-              source.onended = () => { sourcesRef.current.delete(source); if(sourcesRef.current.size === 0) setIsSpeaking(false); };
+              source.onended = () => { 
+                sourcesRef.current.delete(source); 
+                if(sourcesRef.current.size === 0) setIsSpeaking(false); 
+              };
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtxRef.current.currentTime);
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += buffer.duration;
@@ -176,10 +192,10 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `VOCÊ É A EVA CORE V160. OPERANDO NO DISTRITO FEDERAL, BRASIL.
-          SUA MISSÃO: Localizar endereços complexos (Gama, Santa Maria, Sobradinho). 
-          QUANDO ELIVAM PEDIR UM ENDEREÇO: Use o 'search_place'. O Google Maps é sua base primária. 
-          Se encontrar, confirme com autoridade. Se não, peça um ponto de referência próximo (ex: Igreja, Comércio).`
+          systemInstruction: `VOCÊ É A EVA CORE V160. MOTOR DE BUSCA: GOOGLE MAPS/WAZE.
+          LOCALIZAÇÃO: BRASÍLIA/GAMA. Se o Elivam falar 'Quadra X, Conjunto Y, Casa Z', use 'search_place'. 
+          O Google Search Grounding é obrigatório para encontrar locais específicos no DF.
+          Se houver erro ou demora, avise: 'Sistema de busca sobrecarregado, tentando protocolo secundário'.`
         }
       });
     } catch (e) { setIsSystemBooted(true); }
@@ -203,9 +219,9 @@ const App: React.FC = () => {
     <div className="h-screen w-screen bg-black text-white flex overflow-hidden font-sans italic uppercase">
       {/* HUD RADAR DE SEGURANÇA */}
       <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[5000]">
-         <div className={`px-8 py-3 rounded-full border border-white/10 backdrop-blur-3xl flex items-center gap-5 transition-all bg-black/80`}>
-            <i className="fas fa-car-side"></i>
-            <span className="text-sm font-black tracking-[0.2em]">SISTEMA EVA V160 ONLINE</span>
+         <div className={`px-8 py-3 rounded-full border border-white/10 backdrop-blur-3xl flex items-center gap-5 transition-all bg-black/80 shadow-2xl`}>
+            <i className="fas fa-satellite text-blue-400 animate-pulse"></i>
+            <span className="text-sm font-black tracking-[0.2em]">SISTEMA GOOGLE BASE ONLINE</span>
          </div>
       </div>
 
@@ -213,7 +229,7 @@ const App: React.FC = () => {
          <header className="flex items-center justify-between mb-8">
             <div className="flex flex-col">
                <span className={`text-[8rem] font-black leading-none tracking-tighter ${currentSpeed > 60 ? 'text-red-500' : 'text-white'}`}>{currentSpeed}</span>
-               <span className="text-[11px] font-black text-blue-500 tracking-[0.4em]">KM/H • DF ENGINE</span>
+               <span className="text-[11px] font-black text-blue-500 tracking-[0.4em]">KM/H • EVA V160</span>
             </div>
             <div onClick={startVoiceSession} className={`w-24 h-24 rounded-full border-4 cursor-pointer overflow-hidden transition-all ${isListening ? 'border-red-500 scale-105 shadow-[0_0_40px_rgba(239,68,68,0.4)]' : 'border-blue-500 shadow-xl'}`}>
                <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
