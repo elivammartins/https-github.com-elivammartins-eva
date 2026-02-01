@@ -27,23 +27,28 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, mod
     
     if (!mapRef.current) {
       mapRef.current = L.map(mapContainerRef.current, { 
-        zoomControl: false, attributionControl: false, center: currentPosition, zoom: 18
+        zoomControl: false, 
+        attributionControl: false, 
+        center: currentPosition, 
+        zoom: 19, // Nível de rua fixo estilo Waze
+        scrollWheelZoom: false, 
+        doubleClickZoom: false,
+        dragging: false
       });
 
       layersRef.current.DARK = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png').addTo(mapRef.current);
-      layersRef.current.SATELLITE = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
 
       const vehicleIcon = L.divIcon({
         className: 'vehicle-marker',
         html: `
           <div id="nav-arrow" class="nav-container" style="transform: rotate(${heading}deg);">
             <div class="glow-effect"></div>
-            <svg width="60" height="60" viewBox="0 0 100 100">
-               <path d="M50 0 L100 100 L50 80 L0 100 Z" fill="#06B6D4" stroke="white" stroke-width="4" />
+            <svg width="70" height="70" viewBox="0 0 100 100">
+               <path d="M50 0 L100 100 L50 80 L0 100 Z" fill="#06B6D4" stroke="white" stroke-width="6" />
             </svg>
           </div>
         `,
-        iconSize: [60, 60], iconAnchor: [30, 30]
+        iconSize: [70, 70], iconAnchor: [35, 35]
       });
 
       vehicleMarkerRef.current = L.marker(currentPosition, { icon: vehicleIcon }).addTo(mapRef.current);
@@ -55,11 +60,13 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, mod
     const mapEl = mapContainerRef.current;
     if (mapEl) {
       if (mode === '3D') {
-        mapEl.style.transform = 'perspective(1200px) rotateX(55deg) scale(1.5)';
-        mapRef.current.setZoom(18);
+        // Estilo WAZE Street-Horizon: Perspectiva profunda
+        mapEl.style.perspectiveOrigin = '50% 100%'; 
+        mapEl.style.transform = 'perspective(1400px) rotateX(55deg) scale(1.6) translateY(-10%)';
+        mapRef.current.setZoom(19); 
       } else {
         mapEl.style.transform = 'none';
-        mapRef.current.setZoom(16);
+        mapRef.current.setZoom(17);
       }
     }
   }, [mode]);
@@ -71,7 +78,9 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, mod
       if (arrow) arrow.style.transform = `rotate(${heading}deg)`;
     }
     if (mapRef.current) {
-      mapRef.current.setView(currentPosition, mapRef.current.getZoom(), { animate: true });
+      // Offset de 0.0003 para manter o veículo no terço inferior da visão perspectivada
+      const offsetPos: [number, number] = [currentPosition[0] + 0.00015, currentPosition[1]];
+      mapRef.current.panTo(offsetPos, { animate: true, duration: 0.8 });
     }
   }, [currentPosition, heading]);
 
@@ -96,7 +105,7 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, mod
         if (data.routes?.[0]) {
           if (routeLayerRef.current) mapRef.current.removeLayer(routeLayerRef.current);
           routeLayerRef.current = L.geoJSON(data.routes[0].geometry, { 
-            style: { color: '#06B6D4', weight: 18, opacity: 0.8, lineJoin: 'round', lineCap: 'round' } 
+            style: { color: '#06B6D4', weight: 30, opacity: 0.85, lineJoin: 'round', lineCap: 'round' } 
           }).addTo(mapRef.current);
 
           if (onRouteUpdate) {
@@ -109,13 +118,13 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, mod
   }, [travel.destinationCoords, travel.stops.length]);
 
   return (
-    <div className="w-full h-full overflow-hidden relative bg-black">
-      <div ref={mapContainerRef} className="w-full h-full transition-all duration-1000 ease-in-out origin-bottom" />
+    <div className="w-full h-full overflow-hidden relative bg-[#080808]">
+      <div ref={mapContainerRef} className="w-full h-full transition-all duration-1000 ease-in-out origin-center" />
       <style>{`
-        .nav-container { position: relative; width: 60px; height: 60px; transition: transform 0.2s ease-out; filter: drop-shadow(0 0 20px rgba(6,182,212,0.9)); }
-        .glow-effect { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; background: #06B6D4; filter: blur(30px); transform: translate(-50%, -50%); opacity: 0.7; }
+        .nav-container { position: relative; width: 70px; height: 70px; transition: transform 0.1s linear; filter: drop-shadow(0 0 25px rgba(6,182,212,0.8)); }
+        .glow-effect { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; background: #06B6D4; filter: blur(35px); transform: translate(-50%, -50%); opacity: 0.7; }
         .vehicle-marker { pointer-events: none !important; }
-        .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(0.6) contrast(1.2) saturate(0.5); }
+        .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(0.4) contrast(1.4) saturate(0.5); }
       `}</style>
     </div>
   );
