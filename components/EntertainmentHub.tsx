@@ -17,104 +17,56 @@ const EntertainmentHub: React.FC<EntertainmentHubProps> = ({ speed, currentApp, 
   const isVideoApp = currentApp.category === 'VIDEO';
 
   return (
-    <div className={`flex flex-col h-full bg-black relative italic uppercase overflow-hidden transition-all duration-500 ${isPip ? 'rounded-[40px] border-2 border-blue-500/50 shadow-[0_0_50px_rgba(59,130,246,0.3)]' : ''}`}>
+    <div className={`flex flex-col h-full bg-black relative italic uppercase overflow-hidden transition-all duration-500 ${isPip ? 'rounded-[40px] border-2 border-blue-500/50' : ''}`}>
        
-       {/* DRIVE CARE HUD (Aviso de Movimento) */}
+       {/* DRIVE CARE HUD */}
        {speed > 5 && isVideoApp && (
-         <div className="absolute top-0 left-0 right-0 z-[100] h-12 bg-red-600/90 backdrop-blur-xl flex items-center justify-center animate-pulse border-b border-white/20 shadow-2xl">
-            <div className="flex items-center gap-4">
-               <i className="fas fa-eye text-white animate-bounce"></i>
-               <span className="text-[11px] font-black text-white tracking-[0.5em]">ALERTA: ATENÇÃO À VIA À FRENTE</span>
-            </div>
+         <div className="absolute top-0 left-0 right-0 z-[100] h-12 bg-red-600/90 backdrop-blur-xl flex items-center justify-center border-b border-white/20 shadow-2xl">
+            <span className="text-[10px] font-black text-white tracking-[0.4em]">MODO CONDUÇÃO: CONTROLE VIA VOZ HABILITADO</span>
          </div>
        )}
 
-       {/* JANELA DE CONTROLES FLUTUANTES */}
-       <div className={`absolute ${isPip ? 'top-3 right-3 scale-75' : 'top-12 right-12'} z-[110] flex gap-4`}>
-          {!isPip && onMinimize && (
-            <button onClick={onMinimize} className="w-14 h-14 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-white border border-white/20 active:scale-90 transition-all shadow-xl">
-               <i className="fas fa-compress"></i>
-            </button>
-          )}
-          {isPip && onMaximize && (
-            <button onClick={onMaximize} className="w-14 h-14 rounded-full bg-blue-600/80 backdrop-blur-md flex items-center justify-center text-white border border-white/20 active:scale-90 transition-all shadow-xl">
-               <i className="fas fa-expand"></i>
-            </button>
-          )}
-          {onClose && (
-            <button onClick={onClose} className="w-14 h-14 rounded-full bg-red-600/80 backdrop-blur-md flex items-center justify-center text-white border border-white/20 active:scale-90 transition-all shadow-xl">
-               <i className="fas fa-times"></i>
-            </button>
-          )}
+       {/* CONTROLES DE JANELA */}
+       <div className="absolute top-12 right-12 z-[110] flex gap-4">
+          <button onClick={onMinimize} className="w-14 h-14 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-white border border-white/20">
+             <i className="fas fa-compress"></i>
+          </button>
+          <button onClick={onClose} className="w-14 h-14 rounded-full bg-red-600/80 backdrop-blur-md flex items-center justify-center text-white">
+             <i className="fas fa-times"></i>
+          </button>
        </div>
 
-       {/* ÁREA CENTRAL DO PLAYER */}
-       <div className="flex-1 relative flex items-center justify-center">
-          {isVideoApp ? (
-             <div className="w-full h-full relative group bg-zinc-900">
-                <img 
-                   src={currentApp.id === 'youtube' 
-                     ? "https://images.unsplash.com/photo-1514525253361-b83f8b9627c5?q=80&w=1200" 
-                     : "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?q=80&w=1200"} 
-                   className="w-full h-full object-cover opacity-80"
-                   alt="Streaming Content"
-                />
-                
-                {/* Overlay de Controle Central */}
-                <div className={`absolute inset-0 bg-black/40 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-12 ${isPip ? 'hidden' : ''}`}>
-                   <button onClick={() => onControl('PREVIOUS')} className="w-20 h-20 rounded-full bg-white/10 text-white text-3xl hover:bg-white/20 active:scale-75 transition-all"><i className="fas fa-step-backward"></i></button>
-                   <button onClick={() => onControl(track.isPlaying ? 'PAUSE' : 'PLAY')} className="w-28 h-28 rounded-full bg-blue-600 text-white text-5xl hover:bg-blue-500 active:scale-75 transition-all flex items-center justify-center">
-                      <i className={`fas ${track.isPlaying ? 'fa-pause' : 'fa-play ml-2'}`}></i>
-                   </button>
-                   <button onClick={() => onControl('NEXT')} className="w-20 h-20 rounded-full bg-white/10 text-white text-3xl hover:bg-white/20 active:scale-75 transition-all"><i className="fas fa-step-forward"></i></button>
-                </div>
-
-                {/* INFO SEMÂNTICA (Séries/Episódios encontrados pela IA) */}
-                {!isPip && (
-                  <div className="absolute bottom-32 left-10 z-50 animate-fade-in">
-                     <div className="bg-black/90 backdrop-blur-2xl border border-white/10 p-8 rounded-[40px] flex flex-col gap-2 shadow-2xl">
-                        <span className="text-blue-500 text-[10px] font-black tracking-[0.3em] uppercase">Sincronia Semântica</span>
-                        <h3 className="text-3xl font-black text-white leading-none truncate max-w-lg">{track.title}</h3>
-                        <p className="text-white/40 text-[11px] font-bold tracking-widest uppercase">{currentApp.name} STREAMING • V160 ENGINE</p>
-                     </div>
-                  </div>
-                )}
+       {/* HUB CENTRAL (REMOTE CONTROL MODE) */}
+       <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+          <div className="mb-10 w-48 h-48 rounded-[60px] bg-white/5 border border-white/10 flex items-center justify-center shadow-2xl animate-pulse-slow">
+             <i className={`fas ${currentApp.icon} text-8xl ${currentApp.color}`}></i>
+          </div>
+          
+          <div className="bg-white/5 backdrop-blur-3xl p-10 rounded-[50px] border border-white/10 max-w-2xl w-full">
+             <span className="text-blue-500 text-[9px] font-black tracking-[0.5em] block mb-2">MODO CONTROLE REMOTO</span>
+             <h2 className="text-4xl font-black text-white mb-2 leading-none truncate">{track.title}</h2>
+             <p className="text-white/30 text-[11px] font-bold tracking-widest">{currentApp.name} STREAMING • SINCRONIZADO</p>
+             
+             <div className="mt-12 flex items-center justify-center gap-10">
+                <button onClick={() => onControl('PREVIOUS')} className="w-20 h-20 rounded-full bg-white/5 text-white text-3xl hover:bg-white/10 active:scale-90 transition-all"><i className="fas fa-step-backward"></i></button>
+                <button 
+                   onClick={() => onControl(track.isPlaying ? 'PAUSE' : 'PLAY')} 
+                   className="w-32 h-32 rounded-full bg-white text-black text-5xl flex items-center justify-center shadow-2xl active:scale-95 transition-all"
+                >
+                   <i className={`fas ${track.isPlaying ? 'fa-pause' : 'fa-play ml-2'}`}></i>
+                </button>
+                <button onClick={() => onControl('NEXT')} className="w-20 h-20 rounded-full bg-white/5 text-white text-3xl hover:bg-white/10 active:scale-90 transition-all"><i className="fas fa-step-forward"></i></button>
              </div>
-          ) : (
-             <div className="w-full h-full bg-gradient-to-br from-[#0c0c0e] to-black flex items-center justify-center">
-                <div className={`${isPip ? 'w-24 h-24' : 'w-64 h-64'} rounded-[70px] bg-white/5 flex items-center justify-center border border-white/10 shadow-inner animate-pulse-slow`}>
-                   <i className={`fas ${currentApp.icon} ${isPip ? 'text-4xl' : 'text-9xl'} ${currentApp.color}`}></i>
-                </div>
-             </div>
-          )}
+          </div>
        </div>
 
-       {/* BARRA DE PROGRESSO & CONTROLES INFERIORES */}
-       {!isPip && (
-         <div className="h-32 bg-black border-t border-white/5 flex items-center px-12 gap-10 shrink-0 relative">
-            <div className="absolute top-0 left-0 right-0 h-1.5 bg-white/5">
-               <div className="h-full bg-blue-600 shadow-[0_0_15px_rgba(37,99,235,0.8)] transition-all duration-1000" style={{width: `${track.progress || 10}%`}}></div>
-            </div>
-            
-            <div className={`w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center text-4xl ${currentApp.color}`}>
-               <i className={currentApp.icon}></i>
-            </div>
-            <div className="flex-1 flex flex-col justify-center min-w-0">
-               <h4 className="text-2xl font-black text-white truncate leading-none mb-2">{track.title}</h4>
-               <p className="text-[11px] font-black text-white/30 tracking-[0.3em] truncate uppercase">{track.artist} • EVA CORE V160</p>
-            </div>
-            <div className="flex items-center gap-8">
-               <button onClick={() => onControl('PREVIOUS')} className="text-white/40 hover:text-white text-3xl transition-all"><i className="fas fa-backward-step"></i></button>
-               <button onClick={() => onControl(track.isPlaying ? 'PAUSE' : 'PLAY')} className="w-16 h-16 rounded-full bg-white text-black text-3xl flex items-center justify-center shadow-white/10 shadow-2xl active:scale-90 transition-all">
-                  <i className={`fas ${track.isPlaying ? 'fa-pause' : 'fa-play ml-1'}`}></i>
-               </button>
-               <button onClick={() => onControl('NEXT')} className="text-white/40 hover:text-white text-3xl transition-all"><i className="fas fa-forward-step"></i></button>
-            </div>
-         </div>
-       )}
+       {/* STATUS BAR */}
+       <div className="h-24 bg-white/5 border-t border-white/5 flex items-center justify-center px-12 italic">
+          <p className="text-[10px] font-black text-white/20 tracking-[0.6em]">PANDORA CORE V160 • MEDIA BRIDGE ACTIVE</p>
+       </div>
        <style>{`
-          @keyframes pulse-slow { 0%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.05); opacity: 1; } }
-          .animate-pulse-slow { animation: pulse-slow 6s infinite ease-in-out; }
+          @keyframes pulse-slow { 0%, 100% { transform: scale(1); opacity: 0.6; } 50% { transform: scale(1.05); opacity: 1; } }
+          .animate-pulse-slow { animation: pulse-slow 5s infinite ease-in-out; }
        `}</style>
     </div>
   );
