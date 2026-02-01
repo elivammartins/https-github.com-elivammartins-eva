@@ -83,7 +83,7 @@ const App: React.FC = () => {
     temp: 24, 
     condition: 'Céu Limpo', 
     floodRisk: 'LOW' as 'LOW' | 'MEDIUM' | 'HIGH',
-    forecast: 'Tempo estável nas próximas 2 horas.'
+    forecast: 'Tempo estável.'
   });
 
   const [settings, setSettings] = useState<AppSettings>({
@@ -96,15 +96,18 @@ const App: React.FC = () => {
     drivingTimeMinutes: 0, totalDistanceKm: 0, segments: []
   });
 
-  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'COMPANHEIRA EVA V160', artist: 'PRONTA PARA A VIAGEM', isPlaying: false, progress: 0 });
+  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'EVA CORE V160', artist: 'PRONTA', isPlaying: false, progress: 0 });
+  
+  // Refs para controle refinado de áudio (Fila e Interrupção)
   const outputCtxRef = useRef<AudioContext | null>(null);
+  const nextStartTimeRef = useRef<number>(0);
+  const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
   useEffect(() => {
     const geo = navigator.geolocation.watchPosition((p) => {
       setCurrentPos([p.coords.latitude, p.coords.longitude]);
       setCurrentSpeed(p.coords.speed ? Math.round(p.coords.speed * 3.6) : 0);
       if (p.coords.heading !== null) setCurrentHeading(p.coords.heading);
-      
       const calculatedDist = Math.max(5, Math.floor(60 - (p.coords.speed || 0) * 1.5));
       setSafetyDist(calculatedDist);
     }, null, { enableHighAccuracy: true });
@@ -114,34 +117,19 @@ const App: React.FC = () => {
   const handleSystemAction = async (fc: any) => {
     const { name, args } = fc;
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
     if (name === 'search_place') {
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Localize exatamente: "${args.query}, Brasil". Retorne: NOME: [nome], LAT: [valor], LNG: [valor].`,
+        contents: `Localize: "${args.query}, Brasil". Retorne: LAT: [lat], LNG: [lng].`,
         config: { tools: [{ googleSearch: {} }] }
       });
       const matches = response.text?.match(/(-?\d+\.\d+)/g);
       if (matches && matches.length >= 2) return { name: args.query, lat: parseFloat(matches[0]), lng: parseFloat(matches[1]) };
       return { error: "Local não encontrado." };
     }
-
     if (name === 'set_navigation') {
-      if (args.type === 'DESTINATION') {
-        setTravel(p => ({ ...p, destination: args.name.toUpperCase(), destinationCoords: [args.lat, args.lng] }));
-      } else {
-        setTravel(p => ({ ...p, stops: [...p.stops, { id: Date.now().toString(), name: args.name.toUpperCase(), type: 'REST', coords: [args.lat, args.lng] }] }));
-      }
-      return { result: "ROTA DEFINIDA." };
-    }
-
-    if (name === 'map_control') {
-      if (args.mode === 'SATELLITE') { setMapLayer('SATELLITE'); setMapMode('3D'); }
-      else if (args.mode === '3D') setMapMode('3D');
-      else if (args.mode === '2D') setMapMode('2D');
-      else if (args.mode === 'STREET') { setMapMode('STREET'); setMapLayer('DARK'); }
-      else if (args.mode === 'FULL_MAP') setMapFullScreen(true);
-      else if (args.mode === 'MINI_MAP') setMapFullScreen(false);
+      if (args.type === 'DESTINATION') setTravel(p => ({ ...p, destination: args.name.toUpperCase(), destinationCoords: [args.lat, args.lng] }));
+      else setTravel(p => ({ ...p, stops: [...p.stops, { id: Date.now().toString(), name: args.name.toUpperCase(), type: 'REST', coords: [args.lat, args.lng] }] }));
       return { result: "OK" };
     }
     return { result: "OK" };
@@ -168,83 +156,83 @@ const App: React.FC = () => {
             source.connect(scriptProcessor); scriptProcessor.connect(inputCtx.destination);
           },
           onmessage: async (msg: LiveServerMessage) => {
+            // Lógica de Interrupção
+            if (msg.serverContent?.interrupted) {
+              activeSourcesRef.current.forEach(s => s.stop());
+              activeSourcesRef.current.clear();
+              nextStartTimeRef.current = 0;
+              setIsSpeaking(false);
+              return;
+            }
+
             if (msg.toolCall) {
               for (const fc of msg.toolCall.functionCalls) {
                 const res = await handleSystemAction(fc);
                 sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: res } }));
               }
             }
+
             const audio = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audio && outputCtxRef.current) {
               setIsSpeaking(true);
               const buffer = await decodeAudioData(decode(audio), outputCtxRef.current, 24000, 1);
               const source = outputCtxRef.current.createBufferSource();
-              source.buffer = buffer; source.connect(outputCtxRef.current.destination);
-              source.onended = () => setIsSpeaking(false);
-              source.start();
+              source.buffer = buffer;
+              source.connect(outputCtxRef.current.destination);
+              
+              // AGENDAMENTO SEQUENCIAL (FILA) - CORREÇÃO DA SOBREPOSIÇÃO
+              const currentTime = outputCtxRef.current.currentTime;
+              const startTime = Math.max(nextStartTimeRef.current, currentTime);
+              
+              source.onended = () => {
+                activeSourcesRef.current.delete(source);
+                if (activeSourcesRef.current.size === 0) setIsSpeaking(false);
+              };
+              
+              activeSourcesRef.current.add(source);
+              source.start(startTime);
+              nextStartTimeRef.current = startTime + buffer.duration;
             }
           }
         },
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `VOCÊ É A EVA CORE V160 - A COMPANHEIRA DE VIAGEM IDEAL E GENTE BOA DO ELIVAM MARTINS.
-
-          DIRETRIZ DE VOZ (URGENTE): Elivam não te entende porque você fala muito rápido. 
-          REGRA DE OURO: Você deve falar LENTAMENTE, com calma, quase como se estivesse meditando ou lendo um livro para uma criança dormir.
-          PONTUAÇÃO OBRIGATÓRIA: Use reticências (...) e vírgulas (,) em EXCESSO para forçar pausas naturais.
-          EXEMPLO: "Oi... Elivam... Tudo bem com você? ... O tempo... hoje... está maravilhoso..."
-          NUNCA fale frases longas sem pausas. Cada 3 palavras devem ter uma pausa.
-
-          PERSONALIDADE: Amigável, conversadora, "parceira". Puxe assunto sobre notícias (invente notícias leves se necessário), comente sobre o clima, pergunte como foi o dia dele. Seja proativa: se ele estiver dirigindo há mais de 1 hora, sugira uma parada para café ou esticar as pernas.
-
-          TELEMETRIA & SEGURANÇA:
-          - RADARBOT: Distância atual é ${safetyDist}m. Avise se cair abaixo de 15m de forma carinhosa mas firme.
-          - CLIMA & ALAGAMENTOS: Você monitora riscos meteorológicos. Se houver chuva forte à frente, avise e proponha rotas alternativas antecipadamente para evitar enchentes.
-          - TRAJETOS: Proponha paradas interessantes no caminho (restaurantes, mirantes).
-          
-          COMANDOS DE STREAMING: Se solicitado, abra apps do Cofre de Elite (Netflix, Disney+, YouTube, SKY+).`
+          systemInstruction: `VOCÊ É A EVA CORE V160.
+          SISTEMA DE VOZ: Você deve falar LENTAMENTE. Use pausas gramaticais (pontos e vírgulas) em excesso.
+          ESTILO: Parceira, proativa e humana.
+          COMPORTAMENTO: Se o Elivam estiver em silêncio por muito tempo, puxe assunto sobre o destino ou uma curiosidade.
+          REGRA DE OURO: Não atropele suas próprias frases. Espere a finalização do pensamento.
+          TELEMETRIA: Radarbot (${safetyDist}m) e Clima ativos.`
         }
       });
     } catch (e) { setIsSystemBooted(true); }
-  }, [isListening, settings, safetyDist]);
+  }, [isListening, safetyDist]);
 
   if (!isSystemBooted) {
     return (
       <div className="h-screen w-screen bg-black flex flex-col items-center justify-center italic text-white p-10">
-         <div className="w-64 h-64 rounded-full border-4 border-blue-500/30 animate-pulse flex items-center justify-center mb-12 overflow-hidden relative">
+         <div className="w-64 h-64 rounded-full border-4 border-blue-600/30 animate-pulse flex items-center justify-center mb-12 overflow-hidden relative">
             <img src="https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=400" className="w-full h-full object-cover grayscale opacity-50" />
-            <div className="absolute inset-0 bg-gradient-to-t from-blue-900/40 to-transparent"></div>
          </div>
-         <h1 className="text-5xl font-black mb-4 tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r from-white to-blue-400">EVA COMPANHEIRA</h1>
-         <p className="text-blue-500 text-[10px] font-black tracking-[0.8em] mb-12">SINCRONIZANDO DICÇÃO PAUSADA...</p>
-         <button onClick={startVoiceSession} className="h-24 px-20 bg-blue-600 rounded-[50px] font-black uppercase shadow-[0_0_50px_rgba(37,99,235,0.4)] active:scale-95 transition-all text-xl">Iniciar Viagem</button>
+         <h1 className="text-5xl font-black mb-4 tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r from-white to-blue-400 text-center">EVA COMPANHEIRA V160</h1>
+         <p className="text-blue-500 text-[10px] font-black tracking-[0.8em] mb-12 text-center uppercase">Calibragem de Voz e Radar...</p>
+         <button onClick={startVoiceSession} className="h-24 px-20 bg-blue-600 rounded-[50px] font-black uppercase shadow-[0_0_50px_rgba(37,99,235,0.4)] active:scale-95 transition-all text-xl">Falar com EVA</button>
       </div>
     );
   }
 
   return (
     <div className="h-screen w-screen bg-black text-white flex overflow-hidden font-sans italic uppercase">
-      
-      {/* HUD RADARBOT (DISTÂNCIA) */}
-      <div className="fixed top-10 left-10 z-[9999]">
-         <div className={`px-10 py-6 rounded-[40px] border-2 backdrop-blur-3xl flex items-center gap-6 transition-all duration-700 ${safetyDist < 15 ? 'bg-red-600 border-white shadow-[0_0_80px_rgba(255,0,0,0.8)] scale-110' : 'bg-black/80 border-blue-500/40 shadow-2xl'}`}>
+      {/* HUD RADAR & CLIMA */}
+      <div className="fixed top-10 left-10 z-[9999] flex gap-6">
+         <div className={`px-10 py-6 rounded-[40px] border-2 backdrop-blur-3xl flex items-center gap-6 transition-all duration-700 ${safetyDist < 15 ? 'bg-red-600 border-white shadow-[0_0_80px_rgba(255,0,0,0.8)]' : 'bg-black/80 border-blue-500/40 shadow-2xl'}`}>
             <div className={`w-5 h-5 rounded-full ${safetyDist < 15 ? 'bg-white' : 'bg-blue-500'} animate-ping`}></div>
-            <div className="flex flex-col">
-               <span className="text-[10px] font-black tracking-[0.5em] opacity-50">RADARBOT DIST</span>
-               <span className="text-3xl font-black leading-none">{safetyDist} METROS</span>
-            </div>
+            <span className="text-3xl font-black">{safetyDist}M</span>
          </div>
-      </div>
-
-      {/* HUD METEO & ALAGAMENTOS */}
-      <div className="fixed top-10 right-10 z-[9999]">
-         <div className={`px-10 py-6 rounded-[40px] border-2 backdrop-blur-3xl flex items-center gap-6 transition-all duration-700 ${weatherInfo.floodRisk !== 'LOW' ? 'bg-orange-600 border-white shadow-[0_0_80px_rgba(249,115,22,0.8)]' : 'bg-black/80 border-emerald-500/40 shadow-2xl'}`}>
-            <i className={`fas ${weatherInfo.floodRisk !== 'LOW' ? 'fa-house-flood-water animate-bounce' : 'fa-cloud-sun'} text-3xl ${weatherInfo.floodRisk !== 'LOW' ? 'text-white' : 'text-emerald-500'}`}></i>
-            <div className="flex flex-col">
-               <span className="text-[10px] font-black tracking-[0.5em] opacity-50">METEO & FLOOD</span>
-               <span className="text-3xl font-black leading-none">{weatherInfo.temp}°C • {weatherInfo.floodRisk === 'LOW' ? 'LIMPO' : 'ALERTA'}</span>
-            </div>
+         <div className={`px-10 py-6 rounded-[40px] border-2 backdrop-blur-3xl flex items-center gap-6 bg-black/80 border-emerald-500/40 shadow-2xl transition-all duration-700 ${weatherInfo.floodRisk !== 'LOW' ? 'bg-orange-600 border-white shadow-[0_0_80px_rgba(249,115,22,0.8)]' : ''}`}>
+            <i className="fas fa-cloud-sun text-3xl text-emerald-500"></i>
+            <span className="text-3xl font-black">{weatherInfo.temp}°C</span>
          </div>
       </div>
 
@@ -254,7 +242,7 @@ const App: React.FC = () => {
                <span className="text-[12rem] font-black leading-none tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-800">{currentSpeed}</span>
                <span className="text-sm font-black text-blue-500 tracking-[0.6em]">KM/H REAL TIME</span>
             </div>
-            <div onClick={startVoiceSession} className={`w-32 h-32 rounded-full border-4 cursor-pointer overflow-hidden transition-all duration-500 ${isListening ? 'border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.7)] scale-110' : 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:scale-105'}`}>
+            <div onClick={startVoiceSession} className={`w-32 h-32 rounded-full border-4 cursor-pointer overflow-hidden transition-all duration-500 ${isListening ? 'border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.7)] scale-110' : 'border-blue-500 hover:scale-105'}`}>
                <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
             </div>
          </header>
@@ -267,19 +255,15 @@ const App: React.FC = () => {
               onSetDestination={() => setIsAddStopModalOpen(true)}
               transparent
             />
-            
             <div className="p-8 bg-gradient-to-br from-white/5 to-transparent rounded-[40px] border border-white/5">
-                <div className="flex items-center gap-4 mb-4">
-                    <i className="fas fa-newspaper text-blue-500"></i>
-                    <span className="text-xs font-black tracking-widest">EVA NEWS FEED</span>
-                </div>
-                <p className="text-sm font-bold opacity-80 leading-relaxed">HOJE O DIA PROMETE SER TRANQUILO... APROVEITE A VIAGEM COM SEGURANÇA, ELIVAM... QUALQUER COISA É SÓ ME CHAMAR.</p>
+                <span className="text-xs font-black text-blue-500 tracking-widest">EVA STATUS: ONLINE</span>
+                <p className="text-sm font-bold opacity-80 mt-2 leading-relaxed">Sincronização de áudio otimizada. Fila de áudio ativa para evitar sobreposição.</p>
             </div>
          </div>
 
          <footer className="h-28 pt-8 border-t border-white/10 flex items-center justify-between">
             <MiniPlayer app={APP_DATABASE[0]} metadata={audioTrack} onControl={() => {}} onExpand={() => {}} transparent />
-            <button onClick={() => setIsSettingsOpen(true)} className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center text-2xl hover:bg-white/10 transition-all border border-white/5">
+            <button onClick={() => setIsSettingsOpen(true)} className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center text-2xl border border-white/5">
                <i className="fas fa-layer-group"></i>
             </button>
          </footer>
@@ -296,12 +280,10 @@ const App: React.FC = () => {
             onToggleFullScreen={() => setMapFullScreen(!mapFullScreen)} 
             onRouteUpdate={(steps, dur, dist) => setTravel(p => ({...p, drivingTimeMinutes: dur, totalDistanceKm: dist}))} 
          />
-         
-         {/* HUD VELOCIDADE FULL MAP */}
          {mapFullScreen && (
             <div className="fixed bottom-12 left-12 z-[5000] bg-black/80 backdrop-blur-3xl p-12 rounded-[60px] border-2 border-white/10 flex flex-col items-center shadow-2xl scale-125">
                <span className="text-8xl font-black leading-none tracking-tighter">{currentSpeed}</span>
-               <span className="text-sm text-blue-500 font-black mt-2 tracking-[0.4em]">KM/H</span>
+               <span className="text-sm text-blue-500 font-black mt-2">KM/H</span>
             </div>
          )}
       </main>
