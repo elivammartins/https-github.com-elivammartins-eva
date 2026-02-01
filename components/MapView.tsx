@@ -7,12 +7,13 @@ declare const L: any;
 interface MapViewProps {
   travel: TravelInfo;
   currentPosition: [number, number];
+  heading: number;
   isFullScreen: boolean;
   onToggleFullScreen: () => void;
   onRouteUpdate?: (steps: RouteStep[], duration: number, distance: number, segments: RouteSegment[]) => void;
 }
 
-const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, isFullScreen, onToggleFullScreen, onRouteUpdate }) => {
+const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, isFullScreen, onToggleFullScreen, onRouteUpdate }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const routeLayerRef = useRef<any>(null);
@@ -23,10 +24,8 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, isFullScreen
     
     if (!mapRef.current) {
       mapRef.current = L.map(mapContainerRef.current, { 
-        zoomControl: false, 
-        attributionControl: false, 
-        center: currentPosition, 
-        zoom: 17
+        zoomControl: false, attributionControl: false, center: currentPosition, zoom: 17,
+        pitch: 45, bearing: heading
       });
 
       L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png').addTo(mapRef.current);
@@ -34,27 +33,33 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, isFullScreen
       const vehicleIcon = L.divIcon({
         className: 'vehicle-marker',
         html: `
-          <div style="width: 70px; height: 70px; background: rgba(51,204,255,0.1); border: 2px solid #33CCFF; border-radius: 50%; box-shadow: 0 0 40px rgba(51,204,255,0.4); display: flex; align-items: center; justify-content: center; transform: rotate(45deg);">
-            <div style="width: 20px; height: 20px; background: white; border-radius: 50%; border: 3px solid #33CCFF;"></div>
+          <div id="nav-arrow-3d" style="width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; transform: rotate(${heading}deg); transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
+            <svg width="50" height="50" viewBox="0 0 100 100">
+               <filter id="glow">
+                  <feGaussianBlur stdDeviation="3.5" result="coloredBlur"/>
+                  <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+               </filter>
+               <path d="M50 0 L100 100 L50 80 L0 100 Z" fill="#33CCFF" filter="url(#glow)" />
+            </svg>
           </div>
         `,
-        iconSize: [70, 70], iconAnchor: [35, 35]
+        iconSize: [60, 60], iconAnchor: [30, 30]
       });
 
       vehicleMarkerRef.current = L.marker(currentPosition, { icon: vehicleIcon }).addTo(mapRef.current);
     }
-
-    return () => { 
-      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } 
-    };
   }, []);
 
   useEffect(() => {
-    if (vehicleMarkerRef.current) vehicleMarkerRef.current.setLatLng(currentPosition);
-    if (mapRef.current && !isFullScreen) {
-       mapRef.current.panTo(currentPosition, { animate: true });
+    if (vehicleMarkerRef.current) {
+      vehicleMarkerRef.current.setLatLng(currentPosition);
+      const arrow = document.getElementById('nav-arrow-3d');
+      if (arrow) arrow.style.transform = `rotate(${heading}deg)`;
     }
-  }, [currentPosition, isFullScreen]);
+    if (mapRef.current && !isFullScreen) {
+      mapRef.current.setView(currentPosition, mapRef.current.getZoom(), { animate: true });
+    }
+  }, [currentPosition, heading, isFullScreen]);
 
   useEffect(() => {
     const fetchRoute = async () => {
@@ -64,48 +69,27 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, isFullScreen
         `${currentPosition[1]},${currentPosition[0]}`, 
         ...travel.stops.map(s => `${s.coords[1]},${s.coords[0]}`), 
         `${travel.destinationCoords[1]},${travel.destinationCoords[0]}`
-      ];
+      ].join(';');
 
       try {
-        const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${waypoints.join(';')}?overview=full&geometries=geojson&steps=true`);
+        const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${waypoints}?overview=full&geometries=geojson`);
         const data = await res.json();
         
         if (data.routes?.[0]) {
-          const route = data.routes[0];
-          
           if (routeLayerRef.current) mapRef.current.removeLayer(routeLayerRef.current);
-          routeLayerRef.current = L.geoJSON(route.geometry, { 
-            style: { color: '#33CCFF', weight: 8, opacity: 0.6 } 
+          routeLayerRef.current = L.geoJSON(data.routes[0].geometry, { 
+            style: { color: '#33CCFF', weight: 10, opacity: 0.9, lineJoin: 'round', dashArray: '1, 15' } 
           }).addTo(mapRef.current);
 
-          const totalDuration = Math.round(route.duration / 60);
-          const totalDistance = Math.round(route.distance / 1000);
-          
-          // Cálculo de segmentos (entre waypoints)
-          const segments: RouteSegment[] = [];
-          if (route.legs) {
-            route.legs.forEach((leg: any, i: number) => {
-              segments.push({
-                from: i === 0 ? "ATUAL" : travel.stops[i-1].name,
-                to: i === route.legs.length - 1 ? travel.destination : travel.stops[i].name,
-                distanceKm: Math.round(leg.distance / 1000),
-                durationMin: Math.round(leg.duration / 60)
-              });
-            });
-          }
-
-          if (onRouteUpdate) onRouteUpdate([], totalDuration, totalDistance, segments);
+          if (onRouteUpdate) onRouteUpdate([], Math.round(data.routes[0].duration/60), Math.round(data.routes[0].distance/1000), []);
+          mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [80, 80] });
         }
-      } catch (e) { console.error("OSRM Error:", e); }
+      } catch (e) { console.error("Route Engine Error", e); }
     };
     fetchRoute();
-  }, [travel.destinationCoords, travel.stops, currentPosition]);
+  }, [travel.destinationCoords, travel.stops]);
 
-  return (
-    <div className="w-full h-full relative" onClick={onToggleFullScreen}>
-       <div ref={mapContainerRef} className="w-full h-full" />
-    </div>
-  );
+  return <div ref={mapContainerRef} className="w-full h-full" onClick={onToggleFullScreen} />;
 };
 
 export default MapView;

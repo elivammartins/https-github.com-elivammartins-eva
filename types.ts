@@ -8,7 +8,6 @@ export interface LocationData {
 
 export type MediaViewState = 'FULL' | 'PIP' | 'HIDDEN';
 export type WarningType = 'RADAR' | 'ACCIDENT' | 'HAZARD' | 'POLICE' | 'TRAFFIC' | 'COLLISION' | 'FLOOD';
-
 export type CarAction = 'LOCK' | 'UNLOCK' | 'START' | 'STOP' | 'WINDOWS_UP' | 'WINDOWS_DOWN' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
 
 export interface RouteWarning {
@@ -38,8 +37,6 @@ export interface StopInfo {
   name: string;
   type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'DESTINATION';
   coords: [number, number];
-  distanceFromPrev?: number;
-  timeFromPrev?: number;
 }
 
 export interface StopRecommendation {
@@ -47,6 +44,20 @@ export interface StopRecommendation {
   type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE';
   distance: string;
   rating: number;
+}
+
+export interface MeetingInfo {
+  id?: string;
+  title: string;
+  startTime: string;
+  participants?: number;
+}
+
+export interface StreamingCredential {
+  appId: string;
+  user: string;
+  pass: string;
+  profileName: string;
 }
 
 export interface TravelInfo {
@@ -57,18 +68,17 @@ export interface TravelInfo {
   drivingTimeMinutes: number;
   totalDistanceKm: number;
   segments: RouteSegment[];
-  weatherStatus?: string;
-  floodRisk?: 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
 export interface AppSettings {
   userName: string;
   voiceVolume: number;
   privacyMode: boolean;
-  hideSenderInfo: boolean;
-  messageLimit: 128 | 'full';
   safetyDistance: number; 
   alertVoiceEnabled: boolean;
+  preferredMusicApp: string;
+  preferredVideoApp: string;
+  credentials: StreamingCredential[];
 }
 
 export interface CarStatus {
@@ -94,12 +104,4 @@ export interface TrackMetadata {
   artist: string;
   isPlaying: boolean;
   progress: number;
-  seriesName?: string;
-  season?: number;
-  episode?: number;
-}
-
-export interface MeetingInfo {
-  title: string;
-  startTime: string;
 }
