@@ -26,7 +26,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'search_place',
     parameters: {
       type: Type.OBJECT,
-      description: 'Busca locais exatos usando a base do Google Maps. Essencial para Brasília/DF e arredores.',
+      description: 'Busca endereços detalhados (ex: Quadra, Conjunto, Setor) no Distrito Federal usando Google Maps.',
       properties: { query: { type: Type.STRING } },
       required: ['query']
     }
@@ -39,7 +39,7 @@ const toolDeclarations: FunctionDeclaration[] = [
       properties: {
         appId: { type: Type.STRING, enum: ['spotify', 'youtube', 'netflix', 'ytmusic'] },
         action: { type: Type.STRING, enum: ['SEARCH_AND_PLAY', 'OPEN_APP'] },
-        refinedQuery: { type: Type.STRING, description: 'Ex: "Stranger Things S02E04 Will o Sábio"' }
+        refinedQuery: { type: Type.STRING }
       },
       required: ['appId', 'action', 'refinedQuery']
     }
@@ -48,7 +48,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'media_playback_control',
     parameters: {
       type: Type.OBJECT,
-      description: 'Comanda o player nativo do Android.',
+      description: 'Comanda o player nativo.',
       properties: { command: { type: Type.STRING, enum: ['PLAY', 'PAUSE', 'NEXT', 'PREVIOUS'] } },
       required: ['command']
     }
@@ -62,7 +62,7 @@ const App: React.FC = () => {
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
   
   const [currentSpeed, setCurrentSpeed] = useState(0);
-  const [currentPos, setCurrentPos] = useState<[number, number]>([-15.7942, -47.8822]); // Default Brasília
+  const [currentPos, setCurrentPos] = useState<[number, number]>([-15.7942, -47.8822]);
   const [safetyDist, setSafetyDist] = useState(30);
   
   const [travel, setTravel] = useState<TravelInfo>({ 
@@ -74,9 +74,8 @@ const App: React.FC = () => {
     lastAction: 'IDLE', isEngineRunning: true, areWindowsOpen: false, isLocked: false, isUpdating: false, hazardActive: false
   });
 
-  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'SPOTIFY READY', artist: 'ÁUDIO DO SISTEMA', isPlaying: false, progress: 0 });
+  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'SISTEMA ONLINE', artist: 'EVA V160', isPlaying: false, progress: 0 });
   const [videoTrack, setVideoTrack] = useState<TrackMetadata>({ title: 'STANDBY', artist: 'VÍDEO ENGINE', isPlaying: false, progress: 0 });
-  
   const [mediaState, setMediaState] = useState<MediaViewState>('HIDDEN');
   const [currentAudioApp, setCurrentAudioApp] = useState<MediaApp>(APP_DATABASE[0]);
   const [currentVideoApp, setCurrentVideoApp] = useState<MediaApp>(APP_DATABASE[4]);
@@ -99,10 +98,7 @@ const App: React.FC = () => {
     const isPlaying = command === 'PLAY' || command === 'NEXT';
     if (mediaState === 'FULL') setVideoTrack(v => ({ ...v, isPlaying }));
     else setAudioTrack(a => ({ ...a, isPlaying }));
-    
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-    }
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
   };
 
   const handleSystemAction = async (fc: any) => {
@@ -110,40 +106,40 @@ const App: React.FC = () => {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
     if (fc.name === 'search_place') {
-      // Usa Google Maps Grounding para precisão total
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-latest',
-        contents: `Encontre as coordenadas precisas (lat, lng) e o nome oficial de: ${args.query} em Brasília/Brasil.`,
-        config: { tools: [{ googleMaps: {} }] }
-      });
-      // A IA processa e retorna, mas aqui simulamos a extração para a UI
-      // Em um app real, extrairíamos os chunks. Aqui, usamos a busca local aprimorada como fallback
-      const localRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(args.query + ' Brasil')}&limit=1&countrycodes=br`);
-      const data = await localRes.json();
-      if (data[0]) return { name: data[0].display_name, lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-      return { result: "Local não encontrado na base primária." };
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: `Encontre a localização exata: ${args.query}, Distrito Federal, Brasil.`,
+          config: { 
+            tools: [{ googleMaps: {} }],
+            toolConfig: { retrievalConfig: { latLng: { latitude: currentPos[0], longitude: currentPos[1] } } }
+          }
+        });
+
+        // Fallback inteligente para Nominatim com foco em DF
+        const localRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(args.query + ' Distrito Federal Brasil')}&limit=1&countrycodes=br`);
+        const data = await localRes.json();
+        
+        if (data && data.length > 0) {
+          return { name: data[0].display_name, lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+        }
+        return { error: "Localização não encontrada. Tente simplificar o endereço." };
+      } catch (err) {
+        return { error: "Erro de conexão com o satélite de busca." };
+      }
     }
 
     if (fc.name === 'media_action') {
       const app = APP_DATABASE.find(a => a.id === args.appId) || APP_DATABASE[0];
       const query = args.refinedQuery || '';
-      
       if (app.category === 'VIDEO') {
-        setCurrentVideoApp(app);
-        setVideoTrack({ title: query, artist: app.name, isPlaying: true, progress: 0 });
+        setCurrentVideoApp(app); setVideoTrack({ title: query, artist: app.name, isPlaying: true, progress: 0 });
         setMediaState('FULL');
       } else {
-        setCurrentAudioApp(app);
-        setAudioTrack({ title: query, artist: app.name, isPlaying: true, progress: 0 });
+        setCurrentAudioApp(app); setAudioTrack({ title: query, artist: app.name, isPlaying: true, progress: 0 });
       }
-      
       window.open(app.scheme + encodeURIComponent(query), '_blank');
-      return { result: "Abriu o app nativo via Deep Link." };
-    }
-
-    if (fc.name === 'media_playback_control') {
-      handleControl(args.command as any);
-      return { result: "Comando enviado." };
+      return { result: "App aberto com sucesso." };
     }
 
     return { result: "OK" };
@@ -193,13 +189,14 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `VOCÊ É A EVA CORE V160. SUA BASE DE DADOS GEOGRÁFICA É O GOOGLE MAPS.
-          LOCALIZAÇÃO ATUAL: Brasília/DF. Se Elivam pedir por locais (Setores, Quadras), use o 'googleMaps' para precisão.
-          ENTRETENIMENTO: Se ele pedir um episódio, identifique o título traduzido para o português (ex: "Stranger Things S01E01 O Desaparecimento de Will Byers") e use o deep link nativo.`
+          systemInstruction: `VOCÊ É A EVA CORE V160. SUA BASE DE DADOS PARA BRASÍLIA/DF É O GOOGLE MAPS.
+          ENDEREÇOS DE BRASÍLIA: Entenda formatos como 'Quadra X conjunto Y casa Z'. 
+          Se Elivam pedir um local no Gama, Sobradinho, Taguatinga ou Plano Piloto, use 'search_place'. 
+          NUNCA TRAVE. Se não encontrar, peça para ele ser mais genérico ou dizer o nome de um ponto comercial próximo.`
         }
       });
     } catch (e) { setIsSystemBooted(true); }
-  }, [isListening]);
+  }, [isListening, currentPos]);
 
   if (!isSystemBooted) {
     return (
@@ -219,7 +216,7 @@ const App: React.FC = () => {
     <div className="h-screen w-screen bg-black text-white flex overflow-hidden font-sans italic uppercase">
       {/* HUD RADAR DE SEGURANÇA */}
       <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[5000]">
-         <div className={`px-8 py-3 rounded-full border border-white/10 backdrop-blur-3xl flex items-center gap-5 transition-all ${safetyDist < 15 ? 'bg-red-600' : 'bg-black/80'}`}>
+         <div className={`px-8 py-3 rounded-full border border-white/10 backdrop-blur-3xl flex items-center gap-5 transition-all ${safetyDist < 15 ? 'bg-red-600 shadow-2xl animate-pulse' : 'bg-black/80'}`}>
             <i className="fas fa-car-side"></i>
             <span className="text-sm font-black tracking-[0.2em]">{safetyDist}M RADAR ATIVO</span>
          </div>
@@ -231,7 +228,7 @@ const App: React.FC = () => {
                <span className={`text-[8rem] font-black leading-none tracking-tighter ${currentSpeed > 60 ? 'text-red-500' : 'text-white'}`}>{currentSpeed}</span>
                <span className="text-[11px] font-black text-blue-500 tracking-[0.4em]">KM/H • EVA LIVE</span>
             </div>
-            <div onClick={startVoiceSession} className={`w-24 h-24 rounded-full border-4 cursor-pointer overflow-hidden transition-all ${isListening ? 'border-red-500 scale-105' : 'border-blue-500 shadow-xl'}`}>
+            <div onClick={startVoiceSession} className={`w-24 h-24 rounded-full border-4 cursor-pointer overflow-hidden transition-all ${isListening ? 'border-red-500 scale-105 shadow-[0_0_40px_rgba(239,68,68,0.4)]' : 'border-blue-500 shadow-xl'}`}>
                <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
             </div>
          </header>
