@@ -23,11 +23,14 @@ export interface RouteWarning {
 export interface RouteStep {
   instruction: string;
   distance: number;
+  duration: number;
 }
 
 export interface RouteSegment {
-  distance: string;
-  duration: string;
+  from: string;
+  to: string;
+  distanceKm: number;
+  durationMin: number;
 }
 
 export interface StopInfo {
@@ -35,8 +38,8 @@ export interface StopInfo {
   name: string;
   type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'DESTINATION';
   coords: [number, number];
-  distanceFromPrev?: string;
-  timeFromPrev?: string;
+  distanceFromPrev?: number;
+  timeFromPrev?: number;
 }
 
 export interface StopRecommendation {
@@ -51,8 +54,9 @@ export interface TravelInfo {
   destinationCoords?: [number, number];
   stops: StopInfo[];
   warnings: RouteWarning[];
-  drivingTimeMinutes?: number;
-  totalDistanceKm?: number;
+  drivingTimeMinutes: number;
+  totalDistanceKm: number;
+  segments: RouteSegment[];
   weatherStatus?: string;
   floodRisk?: 'LOW' | 'MEDIUM' | 'HIGH';
 }
