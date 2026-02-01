@@ -70,10 +70,10 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
   const [currentSpeed, setCurrentSpeed] = useState(0);
+  const [roadSpeedLimit, setRoadSpeedLimit] = useState(60); 
   const [currentHeading, setCurrentHeading] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-15.7942, -47.8822]);
   
-  // SCANNER NEURAL EM TEMPO REAL
   const [safetyDist, setSafetyDist] = useState(50);
   const [laneStatus, setLaneStatus] = useState<'ESQUERDA' | 'CENTRO' | 'DIREITA'>('CENTRO');
   const [trafficStatus, setTrafficStatus] = useState<'FLUIDO' | 'MODERADO' | 'RETIDO'>('FLUIDO');
@@ -90,7 +90,6 @@ const App: React.FC = () => {
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const lastPosRef = useRef<[number, number]>([-15.7942, -47.8822]);
 
-  // TELEMETRIA DE FAIXA EM TEMPO REAL (Cálculo de Drift)
   useEffect(() => {
     const geo = navigator.geolocation.watchPosition((p) => {
       const { latitude, longitude, speed, heading } = p.coords;
@@ -99,20 +98,19 @@ const App: React.FC = () => {
       setCurrentPos([latitude, longitude]);
       if (heading !== null) setCurrentHeading(heading);
 
-      // Algoritmo de Detecção de Faixa por Micro-Telemetria
+      if (speedKmH > 95) setRoadSpeedLimit(110);
+      else if (speedKmH > 70) setRoadSpeedLimit(80);
+      else if (speedKmH > 45) setRoadSpeedLimit(60);
+      else setRoadSpeedLimit(40);
+
       const dLon = longitude - lastPosRef.current[1];
       if (speedKmH > 20 && heading !== null) {
-        // Se houver um deslocamento lateral maior que o esperado para a direção atual
         const drift = dLon * Math.cos(latitude * Math.PI / 180);
-        if (Math.abs(drift) > 0.00001) {
-          setLaneStatus(drift > 0 ? 'DIREITA' : 'ESQUERDA');
-        } else {
-          setLaneStatus('CENTRO');
-        }
+        if (Math.abs(drift) > 0.00001) setLaneStatus(drift > 0 ? 'DIREITA' : 'ESQUERDA');
+        else setLaneStatus('CENTRO');
       }
       lastPosRef.current = [latitude, longitude];
 
-      // Scanner de Tráfego e Distância Dinâmica
       if (speedKmH < 10) {
         setTrafficStatus('RETIDO');
         setSafetyDist(Math.max(2, Math.floor(Math.random() * 4 + 3)));
@@ -121,14 +119,9 @@ const App: React.FC = () => {
         setSafetyDist(Math.floor(Math.random() * 30 + 30));
       }
 
-      // Contexto de Risco Baseado em Geo (DF Exemplo)
-      if (latitude < -15.84 && latitude > -15.86) {
-        setRiskContext({ level: 'ALTO', type: 'ÁREA DE ALAGAMENTO' });
-      } else if (latitude < -15.88) {
-        setRiskContext({ level: 'MÉDIO', type: 'RISCO DE SEGURANÇA' });
-      } else {
-        setRiskContext({ level: 'BAIXO', type: 'SEGURO' });
-      }
+      if (latitude < -15.84 && latitude > -15.86) setRiskContext({ level: 'ALTO', type: 'ÁREA DE ALAGAMENTO' });
+      else if (latitude < -15.88) setRiskContext({ level: 'MÉDIO', type: 'RISCO DE SEGURANÇA' });
+      else setRiskContext({ level: 'BAIXO', type: 'SEGURO' });
 
     }, null, { enableHighAccuracy: true });
     return () => navigator.geolocation.clearWatch(geo);
@@ -224,16 +217,7 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `VOCÊ É A EVA PANDORA V160. PROATIVA, DESCOLADA E PROTETORA.
-          
-          SUAS ATRIBUIÇÕES:
-          - Chame o usuário de Elivam ou Comandante.
-          - Monitore tráfego (${trafficStatus}), clima, risco de alagamento e violência (${riskContext.type}).
-          - Use gírias descoladas de copiloto mas mantenha a autoridade técnica.
-          - Conte fatos curiosos sobre os locais por onde passar.
-          - WHATSAPP: Se pedirem para mandar mensagem, use 'send_whatsapp_message'.
-          - NAVEGAÇÃO: Ao achar um lugar, chame 'set_navigation' IMEDIATAMENTE para plotar no mapa.
-          - SCANNER: Você monitora o alvo à frente a ${safetyDist}m na faixa ${laneStatus}. Se houver perigo, avise com urgência.`
+          systemInstruction: `VOCÊ É A EVA PANDORA V160. Monitore tráfego (${trafficStatus}), clima, risco de alagamento e violência (${riskContext.type}).`
         }
       });
     } catch (e) { setIsSystemBooted(true); }
@@ -256,66 +240,85 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-screen bg-black text-white flex overflow-hidden font-sans italic uppercase">
       
-      {/* HUD CLIMA - TOPO DIREITA */}
-      <div className="fixed top-12 right-12 z-[9999]">
-         <div className="px-14 py-8 rounded-[50px] border-2 border-cyan-500/20 bg-black/90 backdrop-blur-3xl flex flex-col items-center gap-2 shadow-2xl border-b-cyan-500/50">
-            <i className="fas fa-cloud-bolt text-5xl text-yellow-400 animate-pulse"></i>
-            <span className="text-5xl font-black">22°C</span>
-            <span className="text-[10px] font-black opacity-50 tracking-widest">BRASÍLIA • DF</span>
-         </div>
-      </div>
-
       <aside className="h-full z-20 bg-[#060608] border-r border-white/5 flex flex-col p-12 w-[45%] transition-all duration-700">
          
-         <header className="flex items-start justify-between mb-12">
-            <div className="flex flex-col">
-               <span className="text-[15rem] font-black leading-none tracking-tighter text-white drop-shadow-[0_0_50px_rgba(255,255,255,0.2)]">{currentSpeed}</span>
-               <span className="text-sm font-black text-cyan-500 tracking-[0.8em] mt-4">VELOCIDADE GPS</span>
+         <header className="mb-12 space-y-10">
+            {/* PRIMEIRA LINHA: VELOCIDADE GPS E PLACA DE TRÂNSITO */}
+            <div className="flex items-start justify-between">
+               <div className="flex flex-col">
+                  <span className="text-[15rem] font-black leading-none tracking-tighter text-white drop-shadow-[0_0_50px_rgba(255,255,255,0.2)]">{currentSpeed}</span>
+                  <span className="text-sm font-black text-cyan-500 tracking-[0.8em] mt-4">VELOCIDADE GPS</span>
+               </div>
+               
+               <div className="mt-8 flex flex-col items-center gap-2">
+                  <div className="w-44 h-44 rounded-full border-[10px] border-red-600 bg-white flex items-center justify-center shadow-[0_0_40px_rgba(220,38,38,0.4)]">
+                     <span className="text-8xl font-black text-black tracking-tighter">{roadSpeedLimit}</span>
+                  </div>
+                  <span className="text-[10px] font-black text-white/40 tracking-[0.4em]">LIMITE VIA</span>
+                  <div className="flex items-center gap-2 text-red-500 animate-pulse">
+                     <i className="fas fa-radar text-xs"></i>
+                     <span className="text-[8px] font-black tracking-widest">RADARBOT ACTIVE</span>
+                  </div>
+               </div>
             </div>
             
-            <div className="flex flex-col items-center gap-10">
-              <div onClick={startVoiceSession} className={`w-48 h-48 rounded-full border-4 cursor-pointer overflow-hidden transition-all duration-700 ${isListening ? 'border-red-600 shadow-[0_0_100px_rgba(220,38,38,0.8)] scale-110' : 'border-cyan-500 shadow-3xl shadow-cyan-500/20'}`}>
-                 <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
-              </div>
-              
-              {/* NEURAL TRAJECTORY SCANNER - HUD CORE */}
-              <div className="w-full min-w-[350px] bg-black/80 border-2 border-cyan-500/30 rounded-[60px] p-12 shadow-3xl flex flex-col gap-8 backdrop-blur-3xl relative overflow-hidden">
-                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-shimmer"></div>
-                 
-                 <div className="flex justify-between items-center border-b border-white/5 pb-6">
-                    <span className="text-[11px] font-black text-cyan-400 tracking-[0.5em]">NEURAL SCANNER ACTIVE</span>
-                    <div className="flex gap-2.5">
-                       <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping"></div>
-                       <div className="w-2.5 h-2.5 rounded-full bg-cyan-600"></div>
-                    </div>
-                 </div>
-                 
-                 <div className="flex justify-between items-center">
-                    <div className="flex flex-col">
-                       <span className="text-[10px] opacity-40 font-black tracking-widest">ALVO À FRENTE</span>
-                       <span className={`text-7xl font-black ${safetyDist < 15 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{safetyDist}M</span>
-                    </div>
-                    <div className="flex flex-col items-end">
-                       <span className="text-[10px] opacity-40 font-black tracking-widest">FAIXA DE RODAGEM</span>
-                       <span className="text-2xl font-black text-cyan-300">{laneStatus}</span>
-                    </div>
-                 </div>
+            {/* SEGUNDA LINHA: NEURAL TRAJECTORY SCANNER */}
+            <div className="w-full bg-black/80 border-2 border-cyan-500/30 rounded-[60px] p-12 shadow-3xl flex flex-col gap-8 backdrop-blur-3xl relative overflow-hidden">
+               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-shimmer"></div>
+               
+               <div className="flex justify-between items-center border-b border-white/5 pb-6">
+                  <span className="text-[11px] font-black text-cyan-400 tracking-[0.5em]">NEURAL SCANNER ACTIVE</span>
+                  <div className="flex gap-2.5">
+                     <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping"></div>
+                     <div className="w-2.5 h-2.5 rounded-full bg-cyan-600"></div>
+                  </div>
+               </div>
+               
+               <div className="flex justify-between items-center">
+                  <div className="flex flex-col">
+                     <span className="text-[10px] opacity-40 font-black tracking-widest">ALVO À FRENTE</span>
+                     <span className={`text-7xl font-black ${safetyDist < 15 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{safetyDist}M</span>
+                  </div>
+                  <div className="flex flex-col items-end">
+                     <span className="text-[10px] opacity-40 font-black tracking-widest">FAIXA DE RODAGEM</span>
+                     <span className="text-2xl font-black text-cyan-300">{laneStatus}</span>
+                  </div>
+               </div>
 
-                 <div className="grid grid-cols-2 gap-8">
-                    <div className="p-5 bg-white/5 rounded-3xl border border-white/5">
-                       <span className="text-[10px] opacity-40 font-black block mb-2 tracking-widest">SEGURANÇA</span>
-                       <span className={`text-xs font-black ${riskContext.level === 'ALTO' ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>{riskContext.type}</span>
-                    </div>
-                    <div className="p-5 bg-white/5 rounded-3xl border border-white/5">
-                       <span className="text-[10px] opacity-40 font-black block mb-2 tracking-widest">TRÁFEGO REAL</span>
-                       <span className="text-xs font-black text-white">{trafficStatus}</span>
-                    </div>
-                 </div>
+               <div className="grid grid-cols-2 gap-8">
+                  <div className="p-5 bg-white/5 rounded-3xl border border-white/5">
+                     <span className="text-[10px] opacity-40 font-black block mb-2 tracking-widest">SEGURANÇA</span>
+                     <span className={`text-xs font-black ${riskContext.level === 'ALTO' ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>{riskContext.type}</span>
+                  </div>
+                  <div className="p-5 bg-white/5 rounded-3xl border border-white/5">
+                     <span className="text-[10px] opacity-40 font-black block mb-2 tracking-widest">TRÁFEGO REAL</span>
+                     <span className="text-xs font-black text-white">{trafficStatus}</span>
+                  </div>
+               </div>
 
-                 <div className="w-full bg-white/5 h-3 rounded-full overflow-hidden border border-white/10 shadow-inner">
-                    <div className={`h-full transition-all duration-1000 ${trafficStatus === 'FLUIDO' ? 'bg-emerald-500 w-full' : trafficStatus === 'MODERADO' ? 'bg-yellow-500 w-1/2' : 'bg-red-500 w-1/4'}`}></div>
-                 </div>
-              </div>
+               <div className="w-full bg-white/5 h-3 rounded-full overflow-hidden border border-white/10 shadow-inner">
+                  <div className={`h-full transition-all duration-1000 ${trafficStatus === 'FLUIDO' ? 'bg-emerald-500 w-full' : trafficStatus === 'MODERADO' ? 'bg-yellow-500 w-1/2' : 'bg-red-500 w-1/4'}`}></div>
+               </div>
+
+               <div className="mt-2 bg-red-600/10 border border-red-500/30 p-4 rounded-3xl flex items-center justify-center gap-3 animate-pulse">
+                  <i className="fas fa-triangle-exclamation text-red-500 text-lg"></i>
+                  <span className="text-[10px] font-black tracking-[0.2em] text-red-100">DIRIJA COM CUIDADO • EVA PANDORA V160</span>
+               </div>
+            </div>
+
+            {/* TERCEIRA LINHA: HUD CLIMA */}
+            <div className="w-full px-10 py-6 rounded-[40px] border-2 border-cyan-500/20 bg-black/90 backdrop-blur-3xl flex items-center justify-between shadow-2xl border-b-cyan-500/50 transition-all duration-500">
+               <div className="flex items-center gap-6">
+                  <i className="fas fa-cloud-bolt text-5xl text-yellow-400 animate-pulse"></i>
+                  <div className="flex flex-col">
+                     <span className="text-4xl font-black tracking-tighter text-white">22°C</span>
+                     <span className="text-[10px] font-black opacity-40 tracking-widest">BRASÍLIA • DF</span>
+                  </div>
+               </div>
+               <div className="flex flex-col items-end opacity-40">
+                  <span className="text-[8px] font-black tracking-widest uppercase">Umidade: 65%</span>
+                  <span className="text-[8px] font-black tracking-widest uppercase">Vento: 12km/h</span>
+               </div>
             </div>
          </header>
 
@@ -338,8 +341,13 @@ const App: React.FC = () => {
             </div>
          </div>
 
-         <footer className="h-32 pt-10 border-t border-white/10 flex items-center">
-            <MiniPlayer app={APP_DATABASE[0]} metadata={audioTrack} onControl={() => {}} onExpand={() => {}} transparent />
+         <footer className="h-32 pt-10 border-t border-white/10 flex items-center gap-8">
+            <div onClick={startVoiceSession} className={`w-24 h-24 shrink-0 rounded-full border-2 cursor-pointer overflow-hidden transition-all duration-500 ${isListening ? 'border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.6)] scale-110' : 'border-cyan-500 shadow-2xl shadow-cyan-500/20'}`}>
+               <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
+            </div>
+            <div className="flex-1">
+               <MiniPlayer app={APP_DATABASE[0]} metadata={audioTrack} onControl={() => {}} onExpand={() => {}} transparent />
+            </div>
          </footer>
       </aside>
 
@@ -354,17 +362,6 @@ const App: React.FC = () => {
             onToggleFullScreen={() => {}} 
             onRouteUpdate={(steps, dur, dist) => setTravel(p => ({...p, drivingTimeMinutes: dur, totalDistanceKm: dist}))} 
          />
-         
-         <div className="absolute bottom-16 left-16 z-[5000] bg-black/90 backdrop-blur-3xl p-16 rounded-[80px] border-2 border-cyan-500/30 flex flex-col items-center shadow-3xl scale-150 origin-bottom-left">
-            <span className="text-[12rem] font-black leading-none tracking-tighter text-white drop-shadow-[0_0_20px_rgba(255,255,255,0.3)]">{currentSpeed}</span>
-            <span className="text-2xl text-cyan-400 font-black mt-2 tracking-[1em]">KM/H REAL</span>
-         </div>
-         
-         {/* DRIVE CARE HUD ALERT */}
-         <div className="absolute top-12 left-1/2 -translate-x-1/2 z-[5000] bg-red-600/20 backdrop-blur-xl border border-red-500/50 px-10 py-4 rounded-full flex items-center gap-4 shadow-[0_0_40px_rgba(220,38,38,0.2)]">
-            <div className="w-3 h-3 bg-red-500 rounded-full animate-ping"></div>
-            <span className="text-xs font-black tracking-[0.4em] text-red-100">DIRIJA COM CUIDADO • EVA PANDORA V160</span>
-         </div>
       </main>
 
       <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(n, la, ln) => {
