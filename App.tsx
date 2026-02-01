@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
-import { TravelInfo, MediaApp, TrackMetadata, AppSettings, MapMode, MapLayer } from './types';
+import { TravelInfo, MediaApp, TrackMetadata, AppSettings, MapMode, MapLayer, StopInfo } from './types';
 import Avatar from './components/Avatar';
 import MapView from './components/MapView';
 import AddStopModal from './components/AddStopModal';
@@ -37,10 +37,22 @@ const toolDeclarations: FunctionDeclaration[] = [
     }
   },
   {
+    name: 'search_nearby_poi',
+    parameters: {
+      type: Type.OBJECT,
+      description: 'Busca pontos de interesse próximos como cafés, padarias, postos ou restaurantes.',
+      properties: { 
+        type: { type: Type.STRING, enum: ['COFFEE', 'BAKERY', 'GAS', 'FOOD', 'PARKING'] },
+        radius: { type: Type.NUMBER, description: 'Raio de busca em metros. Padrão 2000.' }
+      },
+      required: ['type']
+    }
+  },
+  {
     name: 'set_navigation',
     parameters: {
       type: Type.OBJECT,
-      description: 'Traça a rota no mapa.',
+      description: 'Traça a rota no mapa para um destino ou adiciona uma parada.',
       properties: {
         name: { type: Type.STRING },
         lat: { type: Type.NUMBER },
@@ -54,7 +66,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'map_control',
     parameters: {
       type: Type.OBJECT,
-      description: 'Controla a visão do mapa (3D, 2D, Satélite, Maximizar).',
+      description: 'Controla a visão do mapa.',
       properties: {
         mode: { type: Type.STRING, enum: ['2D', '3D', 'SATELLITE', 'STREET', 'FULL_MAP', 'MINI_MAP'] }
       },
@@ -83,7 +95,6 @@ const App: React.FC = () => {
     temp: 24, 
     condition: 'Céu Limpo', 
     floodRisk: 'LOW' as 'LOW' | 'MEDIUM' | 'HIGH',
-    forecast: 'Tempo estável.'
   });
 
   const [settings, setSettings] = useState<AppSettings>({
@@ -98,7 +109,6 @@ const App: React.FC = () => {
 
   const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'EVA CORE V160', artist: 'PRONTA', isPlaying: false, progress: 0 });
   
-  // Refs para controle refinado de áudio (Fila e Interrupção)
   const outputCtxRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
@@ -108,7 +118,7 @@ const App: React.FC = () => {
       setCurrentPos([p.coords.latitude, p.coords.longitude]);
       setCurrentSpeed(p.coords.speed ? Math.round(p.coords.speed * 3.6) : 0);
       if (p.coords.heading !== null) setCurrentHeading(p.coords.heading);
-      const calculatedDist = Math.max(5, Math.floor(60 - (p.coords.speed || 0) * 1.5));
+      const calculatedDist = Math.max(5, Math.floor(65 - (p.coords.speed || 0) * 1.8));
       setSafetyDist(calculatedDist);
     }, null, { enableHighAccuracy: true });
     return () => navigator.geolocation.clearWatch(geo);
@@ -117,19 +127,45 @@ const App: React.FC = () => {
   const handleSystemAction = async (fc: any) => {
     const { name, args } = fc;
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
     if (name === 'search_place') {
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Localize: "${args.query}, Brasil". Retorne: LAT: [lat], LNG: [lng].`,
+        contents: `Localize exatamente: "${args.query}, Brasil". Retorne: LAT: [lat], LNG: [lng].`,
         config: { tools: [{ googleSearch: {} }] }
       });
       const matches = response.text?.match(/(-?\d+\.\d+)/g);
       if (matches && matches.length >= 2) return { name: args.query, lat: parseFloat(matches[0]), lng: parseFloat(matches[1]) };
       return { error: "Local não encontrado." };
     }
+
+    if (name === 'search_nearby_poi') {
+      // Busca pontos próximos baseada na localização atual
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `Encontre os 3 melhores ${args.type} próximos às coordenadas ${currentPos[0]}, ${currentPos[1]}. Retorne apenas o nome, a latitude e longitude de cada um.`,
+        config: { tools: [{ googleSearch: {} }] }
+      });
+      // Extrai resultados simplificados para a IA
+      return { results: response.text };
+    }
+
     if (name === 'set_navigation') {
-      if (args.type === 'DESTINATION') setTravel(p => ({ ...p, destination: args.name.toUpperCase(), destinationCoords: [args.lat, args.lng] }));
-      else setTravel(p => ({ ...p, stops: [...p.stops, { id: Date.now().toString(), name: args.name.toUpperCase(), type: 'REST', coords: [args.lat, args.lng] }] }));
+      const newStop: StopInfo = { id: Date.now().toString(), name: args.name.toUpperCase(), type: args.type === 'STOP' ? 'REST' : 'DESTINATION', coords: [args.lat, args.lng] };
+      
+      if (args.type === 'DESTINATION') {
+        setTravel(p => ({ ...p, destination: args.name.toUpperCase(), destinationCoords: [args.lat, args.lng], stops: [] }));
+      } else {
+        setTravel(p => ({ ...p, stops: [...p.stops, newStop] }));
+      }
+      return { result: "ROTA ATUALIZADA NO MAPA COM SUCESSO." };
+    }
+
+    if (name === 'map_control') {
+      if (args.mode === 'FULL_MAP') setMapFullScreen(true);
+      else if (args.mode === 'MINI_MAP') setMapFullScreen(false);
+      else if (args.mode === '2D') setMapMode('2D');
+      else if (args.mode === '3D') setMapMode('3D');
       return { result: "OK" };
     }
     return { result: "OK" };
@@ -156,7 +192,6 @@ const App: React.FC = () => {
             source.connect(scriptProcessor); scriptProcessor.connect(inputCtx.destination);
           },
           onmessage: async (msg: LiveServerMessage) => {
-            // Lógica de Interrupção
             if (msg.serverContent?.interrupted) {
               activeSourcesRef.current.forEach(s => s.stop());
               activeSourcesRef.current.clear();
@@ -180,7 +215,6 @@ const App: React.FC = () => {
               source.buffer = buffer;
               source.connect(outputCtxRef.current.destination);
               
-              // AGENDAMENTO SEQUENCIAL (FILA) - CORREÇÃO DA SOBREPOSIÇÃO
               const currentTime = outputCtxRef.current.currentTime;
               const startTime = Math.max(nextStartTimeRef.current, currentTime);
               
@@ -198,16 +232,21 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `VOCÊ É A EVA CORE V160.
-          SISTEMA DE VOZ: Você deve falar LENTAMENTE. Use pausas gramaticais (pontos e vírgulas) em excesso.
-          ESTILO: Parceira, proativa e humana.
-          COMPORTAMENTO: Se o Elivam estiver em silêncio por muito tempo, puxe assunto sobre o destino ou uma curiosidade.
-          REGRA DE OURO: Não atropele suas próprias frases. Espere a finalização do pensamento.
-          TELEMETRIA: Radarbot (${safetyDist}m) e Clima ativos.`
+          systemInstruction: `VOCÊ É A EVA CORE V160. SUA PRIORIDADE É AUXILIAR O ELIVAM MARTINS NA VIAGEM.
+          
+          DIRETRIZ DE VOZ: Fale MUITO DEVAGAR. Use pausas gramaticais (pontos, vírgulas, reticências) em cada frase. 
+          EXEMPLO: "Elivam... encontrei uma padaria... a dois quilômetros... você quer parar?"
+          
+          LÓGICA DE POI (PONTOS DE INTERESSE): Você tem acesso à ferramenta 'search_nearby_poi'. Se o Elivam pedir café, comida, ou se você notar que a viagem está longa, use esta ferramenta, apresente as opções e se ele escolher uma, use 'set_navigation' com o tipo 'STOP' para adicionar à rota IMEDIATAMENTE.
+          
+          REGRAS: 
+          1. Se ele pedir para ir a um lugar, use 'search_place' e depois 'set_navigation' (DESTINATION).
+          2. Não fale várias coisas ao mesmo tempo. Espere o áudio anterior terminar.
+          3. Seja proativa com o clima e radares.`
         }
       });
     } catch (e) { setIsSystemBooted(true); }
-  }, [isListening, safetyDist]);
+  }, [isListening, currentPos]);
 
   if (!isSystemBooted) {
     return (
@@ -215,39 +254,50 @@ const App: React.FC = () => {
          <div className="w-64 h-64 rounded-full border-4 border-blue-600/30 animate-pulse flex items-center justify-center mb-12 overflow-hidden relative">
             <img src="https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=400" className="w-full h-full object-cover grayscale opacity-50" />
          </div>
-         <h1 className="text-5xl font-black mb-4 tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r from-white to-blue-400 text-center">EVA COMPANHEIRA V160</h1>
-         <p className="text-blue-500 text-[10px] font-black tracking-[0.8em] mb-12 text-center uppercase">Calibragem de Voz e Radar...</p>
-         <button onClick={startVoiceSession} className="h-24 px-20 bg-blue-600 rounded-[50px] font-black uppercase shadow-[0_0_50px_rgba(37,99,235,0.4)] active:scale-95 transition-all text-xl">Falar com EVA</button>
+         <h1 className="text-5xl font-black mb-4 tracking-tighter uppercase text-center">PANDORA EVA V160</h1>
+         <button onClick={startVoiceSession} className="h-24 px-20 bg-blue-600 rounded-[50px] font-black uppercase shadow-[0_0_50px_rgba(37,99,235,0.4)] active:scale-95 transition-all text-xl">Ativar Co-Piloto</button>
       </div>
     );
   }
 
   return (
     <div className="h-screen w-screen bg-black text-white flex overflow-hidden font-sans italic uppercase">
-      {/* HUD RADAR & CLIMA */}
-      <div className="fixed top-10 left-10 z-[9999] flex gap-6">
-         <div className={`px-10 py-6 rounded-[40px] border-2 backdrop-blur-3xl flex items-center gap-6 transition-all duration-700 ${safetyDist < 15 ? 'bg-red-600 border-white shadow-[0_0_80px_rgba(255,0,0,0.8)]' : 'bg-black/80 border-blue-500/40 shadow-2xl'}`}>
-            <div className={`w-5 h-5 rounded-full ${safetyDist < 15 ? 'bg-white' : 'bg-blue-500'} animate-ping`}></div>
-            <span className="text-3xl font-black">{safetyDist}M</span>
+      
+      {/* HUD RADARBOT - POSICIONADO NO TOPO CENTRO PARA EVITAR SOBREPOSIÇÃO */}
+      <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[9999]">
+         <div className={`px-12 py-5 rounded-[40px] border-2 backdrop-blur-3xl flex items-center gap-8 transition-all duration-700 ${safetyDist < 15 ? 'bg-red-600 border-white shadow-[0_0_80px_rgba(255,0,0,0.8)]' : 'bg-black/80 border-blue-500/40 shadow-2xl'}`}>
+            <div className="flex flex-col items-center">
+               <span className="text-[9px] font-black tracking-[0.4em] opacity-50">RADARBOT</span>
+               <span className="text-4xl font-black leading-none">{safetyDist}M</span>
+            </div>
+            <div className="w-[1px] h-10 bg-white/10"></div>
+            <div className="flex flex-col items-center">
+               <span className="text-[9px] font-black tracking-[0.4em] opacity-50">SPEED LIMIT</span>
+               <span className="text-4xl font-black leading-none">80</span>
+            </div>
          </div>
-         <div className={`px-10 py-6 rounded-[40px] border-2 backdrop-blur-3xl flex items-center gap-6 bg-black/80 border-emerald-500/40 shadow-2xl transition-all duration-700 ${weatherInfo.floodRisk !== 'LOW' ? 'bg-orange-600 border-white shadow-[0_0_80px_rgba(249,115,22,0.8)]' : ''}`}>
+      </div>
+
+      {/* HUD CLIMA - TOPO DIREITA */}
+      <div className="fixed top-10 right-10 z-[9999]">
+         <div className="px-10 py-5 rounded-[40px] border-2 border-emerald-500/40 bg-black/80 backdrop-blur-3xl flex items-center gap-6 shadow-2xl">
             <i className="fas fa-cloud-sun text-3xl text-emerald-500"></i>
             <span className="text-3xl font-black">{weatherInfo.temp}°C</span>
          </div>
       </div>
 
       <aside className={`h-full z-20 bg-[#060608] border-r border-white/5 flex flex-col p-10 transition-all duration-700 ${mapFullScreen ? 'w-0 -ml-32 opacity-0 pointer-events-none' : 'w-[45%]'}`}>
-         <header className="flex items-center justify-between mb-12">
+         <header className="flex items-center justify-between mb-10">
             <div className="flex flex-col">
-               <span className="text-[12rem] font-black leading-none tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-800">{currentSpeed}</span>
-               <span className="text-sm font-black text-blue-500 tracking-[0.6em]">KM/H REAL TIME</span>
+               <span className="text-[12rem] font-black leading-none tracking-tighter text-white">{currentSpeed}</span>
+               <span className="text-sm font-black text-blue-500 tracking-[0.6em]">KM/H REAL</span>
             </div>
-            <div onClick={startVoiceSession} className={`w-32 h-32 rounded-full border-4 cursor-pointer overflow-hidden transition-all duration-500 ${isListening ? 'border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.7)] scale-110' : 'border-blue-500 hover:scale-105'}`}>
+            <div onClick={startVoiceSession} className={`w-32 h-32 rounded-full border-4 cursor-pointer overflow-hidden transition-all duration-500 ${isListening ? 'border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.7)]' : 'border-blue-500 shadow-xl'}`}>
                <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
             </div>
          </header>
 
-         <div className="flex-1 overflow-y-auto no-scrollbar pb-10 space-y-10">
+         <div className="flex-1 overflow-y-auto no-scrollbar pb-10 space-y-8">
             <NavigationPanel 
               travel={travel} 
               onAddStop={() => setIsAddStopModalOpen(true)}
@@ -255,9 +305,20 @@ const App: React.FC = () => {
               onSetDestination={() => setIsAddStopModalOpen(true)}
               transparent
             />
-            <div className="p-8 bg-gradient-to-br from-white/5 to-transparent rounded-[40px] border border-white/5">
-                <span className="text-xs font-black text-blue-500 tracking-widest">EVA STATUS: ONLINE</span>
-                <p className="text-sm font-bold opacity-80 mt-2 leading-relaxed">Sincronização de áudio otimizada. Fila de áudio ativa para evitar sobreposição.</p>
+            
+            {/* QUICK POI BAR */}
+            <div className="grid grid-cols-4 gap-4">
+               {[
+                 { icon: 'fa-coffee', color: 'text-orange-400', label: 'Café', type: 'COFFEE' },
+                 { icon: 'fa-bread-slice', color: 'text-amber-300', label: 'Padaria', type: 'BAKERY' },
+                 { icon: 'fa-gas-pump', color: 'text-yellow-500', label: 'Posto', type: 'GAS' },
+                 { icon: 'fa-utensils', color: 'text-emerald-400', label: 'Fome', type: 'FOOD' }
+               ].map(poi => (
+                 <button key={poi.label} onClick={() => {}} className="bg-white/5 p-4 rounded-3xl flex flex-col items-center gap-2 border border-white/5 active:scale-90 transition-all">
+                    <i className={`fas ${poi.icon} ${poi.color} text-xl`}></i>
+                    <span className="text-[8px] font-black">{poi.label}</span>
+                 </button>
+               ))}
             </div>
          </div>
 
@@ -280,17 +341,19 @@ const App: React.FC = () => {
             onToggleFullScreen={() => setMapFullScreen(!mapFullScreen)} 
             onRouteUpdate={(steps, dur, dist) => setTravel(p => ({...p, drivingTimeMinutes: dur, totalDistanceKm: dist}))} 
          />
+         
+         {/* HUD VELOCIDADE FULL MAP - REPOSICIONADO PARA BAIXO ESQUERDA */}
          {mapFullScreen && (
-            <div className="fixed bottom-12 left-12 z-[5000] bg-black/80 backdrop-blur-3xl p-12 rounded-[60px] border-2 border-white/10 flex flex-col items-center shadow-2xl scale-125">
+            <div className="fixed bottom-12 left-12 z-[5000] bg-black/80 backdrop-blur-3xl p-12 rounded-[60px] border-2 border-white/10 flex flex-col items-center shadow-2xl scale-110">
                <span className="text-8xl font-black leading-none tracking-tighter">{currentSpeed}</span>
-               <span className="text-sm text-blue-500 font-black mt-2">KM/H</span>
+               <span className="text-sm text-blue-500 font-black mt-2 tracking-widest">KM/H REAL</span>
             </div>
          )}
       </main>
 
       <SettingsMenu isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} onUpdate={setSettings} mediaApps={APP_DATABASE} />
       <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(n, la, ln) => {
-          setTravel(p => ({ ...p, destination: n, destinationCoords: [la, ln] }));
+          setTravel(p => ({ ...p, destination: n.toUpperCase(), destinationCoords: [la, ln], stops: [] }));
           setIsAddStopModalOpen(false);
       }} />
     </div>
