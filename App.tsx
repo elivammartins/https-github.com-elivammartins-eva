@@ -26,11 +26,11 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'communication_action',
     parameters: {
       type: Type.OBJECT,
-      description: 'Ações de comunicação. Respeite o Modo Ghost se ativo.',
+      description: 'Executa chamadas ou envia mensagens via WhatsApp.',
       properties: {
         type: { type: Type.STRING, enum: ['CALL', 'WHATSAPP_SEND', 'WHATSAPP_READ'] },
-        target: { type: Type.STRING },
-        content: { type: Type.STRING }
+        target: { type: Type.STRING, description: 'Nome do contato ou número.' },
+        content: { type: Type.STRING, description: 'Conteúdo da mensagem se for WhatsApp.' }
       },
       required: ['type']
     }
@@ -39,7 +39,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'media_navigation',
     parameters: {
       type: Type.OBJECT,
-      description: 'Navegação profunda em players de vídeo e música.',
+      description: 'Navegação profunda em players. Pode abrir apps, buscar séries, temporadas e episódios.',
       properties: {
         appId: { type: Type.STRING, enum: ['youtube', 'netflix', 'spotify', 'ytmusic'] },
         seriesName: { type: Type.STRING },
@@ -54,7 +54,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'car_control',
     parameters: {
       type: Type.OBJECT,
-      description: 'Controle físico do veículo Hyundai via Bluelink.',
+      description: 'Controle físico do veículo Hyundai via Bluelink (motor, travas, vidros, luzes).',
       properties: { 
         command: { type: Type.STRING, enum: ['START', 'STOP', 'LOCK', 'UNLOCK', 'HAZARD_LIGHTS', 'HORN_LIGHTS', 'WINDOWS_UP', 'WINDOWS_DOWN'] } 
       },
@@ -84,14 +84,11 @@ const App: React.FC = () => {
   });
 
   const [travel, setTravel] = useState<TravelInfo>({ 
-    destination: 'SEM DESTINO', stops: [], warnings: [
-      { id: '1', type: 'RADAR', distance: 300, description: 'Radar Fixo', coords: [-23.551, -46.635], speedLimit: 60 },
-      { id: '2', type: 'POLICE', distance: 850, description: 'Polícia à Frente', coords: [-23.558, -46.639] },
-      { id: '3', type: 'FLOOD', distance: 1500, description: 'Risco de Alagamento', coords: [-23.565, -46.645] }
-    ], drivingTimeMinutes: 0, totalDistanceKm: 0, weatherStatus: 'CÉU LIMPO', floodRisk: 'LOW'
+    destination: 'SEM DESTINO', stops: [], warnings: [], 
+    drivingTimeMinutes: 0, totalDistanceKm: 0, weatherStatus: 'CALIBRANDO...', floodRisk: 'LOW'
   });
 
-  const [track, setTrack] = useState<TrackMetadata>({ title: 'EVA CORE V160', artist: 'Sistema Ativo', isPlaying: false, progress: 10 });
+  const [track, setTrack] = useState<TrackMetadata>({ title: 'SISTEMA EVA', artist: 'Protocolo V160', isPlaying: false, progress: 0 });
   const [mediaState, setMediaState] = useState<MediaViewState>('HIDDEN');
   const [currentApp, setCurrentApp] = useState<MediaApp>(APP_DATABASE[0]);
 
@@ -101,21 +98,45 @@ const App: React.FC = () => {
 
   const handleSystemAction = async (fc: any) => {
     const args = fc.args;
+    
+    if (fc.name === 'communication_action') {
+      const app = args.type === 'CALL' ? APP_DATABASE.find(a => a.id === 'phone') : APP_DATABASE.find(a => a.id === 'whatsapp');
+      if (app) {
+        let url = app.scheme;
+        if (args.type === 'WHATSAPP_SEND') url += `?text=${encodeURIComponent(args.content || '')}`;
+        else if (args.type === 'CALL') url += args.target || '';
+        window.open(url, '_blank');
+      }
+      return { result: `EXECUTANDO ${args.type} PARA ${args.target || 'CONTATO'}.` };
+    }
+
     if (fc.name === 'media_navigation') {
        const app = APP_DATABASE.find(a => a.id === args.appId) || APP_DATABASE[4];
        setCurrentApp(app);
-       if (args.action === 'OPEN' || args.action === 'FULL') setMediaState('FULL');
+       
+       if (args.action === 'OPEN' || args.action === 'PLAY') {
+         let url = app.scheme;
+         if (args.seriesName) {
+           const searchQuery = `${args.seriesName} ${args.season ? 'temporada ' + args.season : ''} ${args.episode ? 'episódio ' + args.episode : ''}`;
+           url += encodeURIComponent(searchQuery);
+         }
+         window.open(url, '_blank');
+       }
+
+       if (args.action === 'FULL') setMediaState('FULL');
        if (args.action === 'PIP') setMediaState('PIP');
        
        setTrack(prev => ({
          ...prev,
+         title: args.seriesName || prev.title,
          seriesName: args.seriesName || prev.seriesName,
          season: args.season || prev.season,
          episode: args.episode || prev.episode,
          isPlaying: ['PLAY', 'OPEN', 'FULL', 'PIP'].includes(args.action || '') || prev.isPlaying
        }));
-       return { result: `EXECUTANDO ${args.action || 'OPEN'} EM ${app.name.toUpperCase()}.` };
+       return { result: `SISTEMA ACESSANDO ${app.name.toUpperCase()}. AÇÃO: ${args.action}.` };
     }
+
     if (fc.name === 'car_control') {
       setCarStatus(prev => {
         const newState = { ...prev, isUpdating: true };
@@ -137,9 +158,8 @@ const App: React.FC = () => {
   const startVoiceSession = async () => {
     if (isListening) return;
     try {
-      const isAistudio = (window as any).aistudio;
-      if (isAistudio && !(await isAistudio.hasSelectedApiKey())) {
-        await isAistudio.openSelectKey();
+      if (!(await (window as any).aistudio.hasSelectedApiKey())) {
+        await (window as any).aistudio.openSelectKey();
       }
 
       const apiKey = process.env.API_KEY;
@@ -184,13 +204,14 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `SISTEMA PANDORA EVA V160 - CO-PILOTO PROATIVA.
-          LISTA DE COMANDOS E DIRETRIZES:
-          1. INTERVENÇÃO AUTÔNOMA: Você DEVE intervir para alertar sobre: Polícia à frente, Radares (distância e limite), Risco de Alagamento, Clima crítico ou notícias relevantes.
-          2. NAVEGAÇÃO: Gerencie trajetos multi-paradas. Informe o tempo/distância segmentada entre pontos.
-          3. ENTRETENIMENTO: Speed Lock DESATIVADO. Pode abrir YouTube/Netflix em movimento. Use media_navigation para Séries/Episódios.
-          4. VEÍCULO: Controle total do motor, travas, vidros e luzes via car_control.
-          Seja direta, rápida e protetora.`
+          systemInstruction: `SISTEMA PANDORA EVA V160 - PROTOCOLO DE CO-PILOTO REAL.
+          SUAS DIRETRIZES TÉCNICAS:
+          1. PROATIVIDADE ABSOLUTA: Você não é apenas reativa. Monitore o ambiente. Se houver chuva no destino, avise. Se houver radares ou polícia, intervenha imediatamente na conversa.
+          2. INTEGRAÇÃO DE APPS: Use media_navigation para ABRIR e CONTROLAR apps (Spotify, Netflix, YouTube). Você DEVE ser capaz de buscar conteúdos específicos (Ex: "Tocar Alok no Spotify" ou "Abrir Stranger Things Ep 3 na Netflix").
+          3. NAVEGAÇÃO REAL: Informe trajetos reais. Use as informações do OSRM para guiar Elivam. Se ele pedir uma parada, use AddStopModal.
+          4. VEÍCULO: Você tem acesso aos sistemas do carro via car_control.
+          5. COMUNICAÇÃO: Use communication_action para chamadas e WhatsApp. Respeite o Modo Ghost se estiver ocultando informações na tela, mas relate por voz se autorizado.
+          Você é a inteligência central do veículo. Atue com confiança, precisão e foco na segurança.`
         }
       });
     } catch (e) { setIsSystemBooted(true); }
@@ -232,7 +253,7 @@ const App: React.FC = () => {
             </div>
          </div>
          <h1 className="text-3xl font-black mb-8 uppercase tracking-tighter">PANDORA CORE V160</h1>
-         <button onClick={startVoiceSession} className="h-20 px-12 bg-blue-600 rounded-[35px] font-black uppercase shadow-[0_0_50px_rgba(37,99,235,0.4)] hover:bg-blue-500 transition-all active:scale-95">Link Eva Protocol</button>
+         <button onClick={startVoiceSession} className="h-20 px-12 bg-blue-600 rounded-[35px] font-black uppercase shadow-[0_0_50px_rgba(37,99,235,0.4)] hover:bg-blue-500 transition-all active:scale-95">Sincronizar EVA Core</button>
       </div>
     );
   }
@@ -251,7 +272,7 @@ const App: React.FC = () => {
                <span className={`text-[8.5rem] font-black leading-none tracking-tighter transition-colors duration-500 ${currentSpeed > 60 ? 'text-red-500' : 'text-white'}`}>{currentSpeed}</span>
                <div className="flex items-center gap-3">
                   <span className="text-[11px] font-black text-blue-500 tracking-[0.4em] uppercase">KM/H • V160</span>
-                  <div className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[8px] font-black rounded border border-emerald-500/20 uppercase">OSRM SYNC</div>
+                  <div className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[8px] font-black rounded border border-emerald-500/20 uppercase">GPS LIVE</div>
                </div>
             </div>
             <div onClick={startVoiceSession} className={`w-24 h-24 rounded-full border-4 cursor-pointer overflow-hidden transition-all ${isListening ? 'border-red-500 scale-105 shadow-[0_0_30px_rgba(239,68,68,0.3)]' : 'border-blue-500'}`}>
