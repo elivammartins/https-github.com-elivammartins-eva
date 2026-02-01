@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { TravelInfo, StopInfo, WarningType, RouteStep } from '../types';
+import { TravelInfo } from '../types';
 
 interface NavigationPanelProps {
   travel: TravelInfo;
@@ -20,88 +20,53 @@ const NavigationPanel: React.FC<NavigationPanelProps> = ({ travel, onAddStop, on
   };
 
   return (
-    <div className={`${transparent ? 'bg-black/40 backdrop-blur-3xl' : 'bg-black/95'} rounded-[40px] border border-white/10 flex flex-col italic uppercase overflow-hidden transition-all duration-500`}>
+    <div className={`${transparent ? 'bg-black/40 backdrop-blur-3xl' : 'bg-black/95'} rounded-[40px] border border-white/10 flex flex-col italic uppercase overflow-hidden`}>
       <div className="p-6">
         <header className="flex justify-between items-center mb-6">
            <div className="flex flex-col">
               <span className="text-[9px] font-black text-emerald-500 tracking-[0.3em]">ROTA PANDORA V160</span>
               <h4 className="text-lg font-black text-white truncate w-40">{travel.destination}</h4>
            </div>
-           <div className="flex gap-2 text-center">
-              <div className="bg-white/5 px-4 py-2 rounded-2xl flex flex-col border border-white/5">
-                 <span className="text-[8px] opacity-40 uppercase">KM</span>
+           <div className="flex gap-2">
+              <div className="bg-white/5 px-4 py-2 rounded-2xl border border-white/5 flex flex-col items-center">
+                 <span className="text-[8px] opacity-40">KM</span>
                  <span className="text-xs font-black">{travel.totalDistanceKm}</span>
               </div>
-              <div className="bg-emerald-600/20 px-4 py-2 rounded-2xl border border-emerald-500/20 flex flex-col">
-                 <span className="text-[8px] text-emerald-400 uppercase">RESTANTE</span>
+              <div className="bg-emerald-600/20 px-4 py-2 rounded-2xl border border-emerald-500/20 flex flex-col items-center">
+                 <span className="text-[8px] text-emerald-400">TEMPO</span>
                  <span className="text-xs font-black text-emerald-400">{formatTime(travel.drivingTimeMinutes)}</span>
               </div>
            </div>
         </header>
 
-        {/* HUD TURN-BY-TURN DINÂMICO */}
         {travel.destination !== 'SEM DESTINO' && (
-          <div className="mb-6 p-5 bg-blue-600/10 border border-blue-500/30 rounded-[30px] flex items-center gap-6 shadow-2xl">
-             <div className="w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center text-3xl text-white shadow-xl">
+          <div className="mb-6 p-6 bg-blue-600/10 border border-blue-500/30 rounded-[30px] flex items-center gap-6">
+             <div className="w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center text-3xl shadow-xl">
                 <i className="fas fa-location-arrow -rotate-45"></i>
              </div>
              <div className="flex-1">
-                <span className="text-[10px] font-black text-blue-400 block tracking-widest mb-1">PRÓXIMA MANOBRA</span>
-                <span className="text-lg font-black leading-none">MANTENHA-SE À DIREITA</span>
-                <p className="text-[11px] font-bold opacity-40 mt-1 uppercase">A 450 METROS</p>
+                <span className="text-[10px] font-black text-blue-400 block tracking-widest">PRÓXIMA MANOBRA</span>
+                <span className="text-lg font-black leading-none uppercase">SIGA EM FRENTE</span>
+                <p className="text-[10px] font-bold opacity-30 mt-1 uppercase">RECALCULANDO EM TEMPO REAL</p>
              </div>
           </div>
         )}
 
-        <div className="space-y-4 max-h-[350px] overflow-y-auto no-scrollbar mb-6">
-           {travel.destination !== 'SEM DESTINO' ? (
-             <div className="relative pl-6 space-y-8">
-                <div className="absolute left-[7px] top-2 bottom-2 w-0.5 bg-white/10"></div>
-                
-                <div className="relative">
-                   <div className="absolute -left-[23px] top-1 w-4 h-4 rounded-full bg-blue-500 border-2 border-black"></div>
-                   <span className="text-[10px] font-black text-white/40 tracking-[0.2em]">VOCÊ ESTÁ AQUI</span>
-                </div>
-
-                {travel.stops.map((stop, i) => (
-                  <div key={stop.id} className="relative">
-                     <div className="absolute -left-[23px] top-1 w-4 h-4 rounded-full bg-white border-2 border-black"></div>
-                     <div className="flex flex-col bg-white/5 p-4 rounded-3xl border border-white/5">
-                        <div className="flex justify-between items-center">
-                           <span className="text-xs font-black text-white">{stop.name}</span>
-                           <button onClick={() => onRemoveStop(stop.id)} className="text-red-500"><i className="fas fa-trash-alt text-xs"></i></button>
-                        </div>
-                        {travel.segments[i+1] && (
-                           <span className="text-[9px] font-bold text-white/30 mt-2 uppercase tracking-widest">
-                             + {formatTime(travel.segments[i+1].durationMin)} • {travel.segments[i+1].distanceKm} KM
-                           </span>
-                        )}
-                     </div>
-                  </div>
-                ))}
-
-                <div className="relative">
-                   <div className="absolute -left-[23px] top-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-black shadow-[0_0_20px_rgba(16,185,129,0.4)]"></div>
-                   <div className="flex flex-col">
-                      <span className="text-xs font-black text-emerald-500">{travel.destination}</span>
-                      <span className="text-[9px] font-bold text-white/20 uppercase tracking-widest">PONTO FINAL</span>
-                   </div>
-                </div>
+        <div className="space-y-4 max-h-[300px] overflow-y-auto no-scrollbar mb-6">
+           {travel.stops.map((stop) => (
+             <div key={stop.id} className="p-4 bg-white/5 border border-white/5 rounded-2xl flex justify-between items-center">
+                <span className="text-xs font-black">{stop.name}</span>
+                <button onClick={() => onRemoveStop(stop.id)} className="text-red-500"><i className="fas fa-times"></i></button>
              </div>
-           ) : (
-             <div className="py-14 text-center opacity-10">
-                <i className="fas fa-location-arrow text-6xl mb-4 animate-pulse"></i>
-                <p className="text-xs font-black tracking-widest">AGUARDANDO COORDENADAS</p>
-             </div>
-           )}
+           ))}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-           <button onClick={onAddStop} className="h-16 rounded-2xl bg-white text-black font-black text-[11px] flex items-center justify-center gap-3">
-             <i className="fas fa-plus-circle text-lg"></i> ADICIONAR PARADA
+           <button onClick={onAddStop} className="h-16 rounded-2xl bg-white text-black font-black text-[10px] flex items-center justify-center gap-3">
+             <i className="fas fa-plus"></i> PARADA
            </button>
-           <button onClick={() => window.open(`waze://?ll=${travel.destinationCoords?.[0]},${travel.destinationCoords?.[1]}&navigate=yes`)} className="h-16 rounded-2xl bg-[#33CCFF] text-white font-black text-[11px] flex items-center justify-center gap-3 shadow-xl">
-             <i className="fab fa-waze text-lg"></i> ABRIR NO WAZE
+           <button onClick={onSetDestination} className="h-16 rounded-2xl bg-blue-600 text-white font-black text-[10px] flex items-center justify-center gap-3">
+             <i className="fas fa-flag-checkered"></i> DESTINO
            </button>
         </div>
       </div>

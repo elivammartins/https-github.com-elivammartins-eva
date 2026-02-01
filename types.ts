@@ -6,6 +6,9 @@ export interface LocationData {
   heading: number | null;
 }
 
+export type MapMode = '2D' | '3D' | 'SATELLITE' | 'STREET';
+export type MapLayer = 'DARK' | 'SATELLITE' | 'HYBRID';
+
 export type MediaViewState = 'FULL' | 'PIP' | 'HIDDEN';
 export type WarningType = 'RADAR' | 'ACCIDENT' | 'HAZARD' | 'POLICE' | 'TRAFFIC' | 'COLLISION' | 'FLOOD';
 export type CarAction = 'LOCK' | 'UNLOCK' | 'START' | 'STOP' | 'WINDOWS_UP' | 'WINDOWS_DOWN' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
@@ -81,13 +84,11 @@ export interface AppSettings {
   credentials: StreamingCredential[];
 }
 
-export interface CarStatus {
-  lastAction: string;
-  isEngineRunning: boolean;
-  areWindowsOpen: boolean;
-  isLocked: boolean;
-  isUpdating: boolean;
-  hazardActive: boolean;
+export interface TrackMetadata {
+  title: string;
+  artist: string;
+  isPlaying: boolean;
+  progress: number;
 }
 
 export interface MediaApp {
@@ -99,9 +100,11 @@ export interface MediaApp {
   scheme: string;
 }
 
-export interface TrackMetadata {
-  title: string;
-  artist: string;
-  isPlaying: boolean;
-  progress: number;
+export interface CarStatus {
+  lastAction: string;
+  isEngineRunning: boolean;
+  areWindowsOpen: boolean;
+  isLocked: boolean;
+  isUpdating: boolean;
+  hazardActive: boolean;
 }
