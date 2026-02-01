@@ -59,6 +59,15 @@ const toolDeclarations: FunctionDeclaration[] = [
       properties: { message: { type: Type.STRING }, phone: { type: Type.STRING } },
       required: ['message']
     }
+  },
+  {
+    name: 'go_to_standby',
+    parameters: {
+      type: Type.OBJECT,
+      description: 'Encerra a sessão de voz ativa e coloca a EVA em modo de espera (standby).',
+      properties: {},
+      required: []
+    }
   }
 ];
 
@@ -69,6 +78,20 @@ const App: React.FC = () => {
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    const saved = localStorage.getItem('pandora_settings');
+    return saved ? JSON.parse(saved) : {
+      userName: 'ELIVAM',
+      voiceVolume: 90,
+      privacyMode: false,
+      safetyDistance: 30,
+      alertVoiceEnabled: true,
+      preferredMusicApp: 'spotify',
+      preferredVideoApp: 'stremio',
+      credentials: []
+    };
+  });
+
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [roadSpeedLimit, setRoadSpeedLimit] = useState(60); 
   const [currentHeading, setCurrentHeading] = useState(0);
@@ -85,10 +108,16 @@ const App: React.FC = () => {
   });
 
   const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'PANDORA V160', artist: 'OFFLINE', isPlaying: false, progress: 0 });
+  
   const outputCtxRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const lastPosRef = useRef<[number, number]>([-15.7942, -47.8822]);
+  const sessionRef = useRef<any>(null);
+
+  useEffect(() => {
+    localStorage.setItem('pandora_settings', JSON.stringify(settings));
+  }, [settings]);
 
   useEffect(() => {
     const geo = navigator.geolocation.watchPosition((p) => {
@@ -127,10 +156,27 @@ const App: React.FC = () => {
     return () => navigator.geolocation.clearWatch(geo);
   }, []);
 
+  const stopVoiceSession = useCallback(() => {
+    if (sessionRef.current) {
+      try { sessionRef.current.close(); } catch (e) {}
+      sessionRef.current = null;
+    }
+    setIsListening(false);
+    setIsSpeaking(false);
+    activeSourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
+    activeSourcesRef.current.clear();
+    nextStartTimeRef.current = 0;
+  }, []);
+
   const handleSystemAction = async (fc: any) => {
     const { name, args } = fc;
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
+    if (name === 'go_to_standby') {
+      setTimeout(() => stopVoiceSession(), 1500); 
+      return { status: "EVA EM STANDBY." };
+    }
+
     if (name === 'send_whatsapp_message') {
       const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(args.message)}${args.phone ? `&phone=${args.phone}` : ''}`;
       window.open(url, '_blank');
@@ -171,7 +217,11 @@ const App: React.FC = () => {
   };
 
   const startVoiceSession = useCallback(async () => {
-    if (isListening) return;
+    if (isListening) {
+      stopVoiceSession();
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -186,19 +236,24 @@ const App: React.FC = () => {
             const source = inputCtx.createMediaStreamSource(stream);
             const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
             scriptProcessor.onaudioprocess = (e) => { 
-              sessionPromise.then(s => s.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) })); 
+              if (sessionRef.current) {
+                sessionRef.current.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) });
+              }
             };
             source.connect(scriptProcessor); scriptProcessor.connect(inputCtx.destination);
           },
           onmessage: async (msg: LiveServerMessage) => {
             if (msg.serverContent?.interrupted) {
-              activeSourcesRef.current.forEach(s => s.stop()); activeSourcesRef.current.clear();
+              activeSourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
+              activeSourcesRef.current.clear();
               nextStartTimeRef.current = 0; setIsSpeaking(false); return;
             }
             if (msg.toolCall) {
               for (const fc of msg.toolCall.functionCalls) {
                 const res = await handleSystemAction(fc);
-                sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: res } }));
+                if (sessionRef.current) {
+                   sessionRef.current.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: res } });
+                }
               }
             }
             const audio = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
@@ -212,16 +267,19 @@ const App: React.FC = () => {
               activeSourcesRef.current.add(source); source.start(startTime);
               nextStartTimeRef.current = startTime + buffer.duration;
             }
-          }
+          },
+          onclose: () => setIsListening(false),
+          onerror: () => setIsListening(false)
         },
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `VOCÊ É A EVA PANDORA V160. Monitore tráfego (${trafficStatus}), clima, risco de alagamento e violência (${riskContext.type}).`
+          systemInstruction: `VOCÊ É A EVA PANDORA V160. CO-PILOTO DO ${settings.userName}. Monitore tráfego (${trafficStatus}), clima, risco de alagamento e violência (${riskContext.type}). SE ELE DISSER PARA VOCÊ DESCANSAR OU ENTRAR EM STANDBY, USE A FUNÇÃO 'go_to_standby'.`
         }
       });
-    } catch (e) { setIsSystemBooted(true); }
-  }, [isListening, currentPos, trafficStatus, safetyDist, laneStatus, riskContext]);
+      sessionRef.current = await sessionPromise;
+    } catch (e) { setIsSystemBooted(true); setIsListening(false); }
+  }, [isListening, currentPos, trafficStatus, safetyDist, laneStatus, riskContext, stopVoiceSession, settings.userName]);
 
   if (!isSystemBooted) {
     return (
@@ -247,7 +305,12 @@ const App: React.FC = () => {
             <div className="flex items-start justify-between">
                <div className="flex flex-col">
                   <span className="text-[15rem] font-black leading-none tracking-tighter text-white drop-shadow-[0_0_50px_rgba(255,255,255,0.2)]">{currentSpeed}</span>
-                  <span className="text-sm font-black text-cyan-500 tracking-[0.8em] mt-4">VELOCIDADE GPS</span>
+                  <div className="flex items-center gap-4 mt-4">
+                     <span className="text-sm font-black text-cyan-500 tracking-[0.8em]">VELOCIDADE GPS</span>
+                     <button onClick={() => setIsSettingsOpen(true)} className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-white/40 hover:text-white transition-all border border-white/10">
+                        <i className="fas fa-cog"></i>
+                     </button>
+                  </div>
                </div>
                
                <div className="mt-8 flex flex-col items-center gap-2">
@@ -306,7 +369,7 @@ const App: React.FC = () => {
                </div>
             </div>
 
-            {/* TERCEIRA LINHA: HUD CLIMA */}
+            {/* TERCEIRA LINHA: HUD CLIMA INTEGRADO */}
             <div className="w-full px-10 py-6 rounded-[40px] border-2 border-cyan-500/20 bg-black/90 backdrop-blur-3xl flex items-center justify-between shadow-2xl border-b-cyan-500/50 transition-all duration-500">
                <div className="flex items-center gap-6">
                   <i className="fas fa-cloud-bolt text-5xl text-yellow-400 animate-pulse"></i>
@@ -333,16 +396,26 @@ const App: React.FC = () => {
             
             <div className="grid grid-cols-4 gap-6">
                {APP_DATABASE.map(app => (
-                 <button key={app.id} onClick={() => window.open(app.id === 'whatsapp' ? app.scheme : app.scheme, '_blank')} className="bg-white/5 p-8 rounded-[45px] flex flex-col items-center gap-4 border border-white/5 active:scale-90 transition-all hover:bg-white/10 hover:border-cyan-500/40 shadow-xl">
+                 <button key={app.id} onClick={() => {
+                   const cred = settings.credentials.find(c => c.appId === app.id);
+                   // Lógica de abertura proativa: se houver perfil no cofre, podemos informar via voz se integrássemos mais profundamente
+                   window.open(app.scheme, '_blank');
+                 }} className="bg-white/5 p-8 rounded-[45px] flex flex-col items-center gap-4 border border-white/5 active:scale-90 transition-all hover:bg-white/10 hover:border-cyan-500/40 shadow-xl relative group">
                     <i className={`${app.icon} ${app.color} text-4xl`}></i>
                     <span className="text-[10px] font-black tracking-widest uppercase">{app.name}</span>
+                    {settings.credentials.find(c => c.appId === app.id) && (
+                      <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,1)] group-hover:scale-150 transition-all"></div>
+                    )}
                  </button>
                ))}
             </div>
          </div>
 
          <footer className="h-32 pt-10 border-t border-white/10 flex items-center gap-8">
-            <div onClick={startVoiceSession} className={`w-24 h-24 shrink-0 rounded-full border-2 cursor-pointer overflow-hidden transition-all duration-500 ${isListening ? 'border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.6)] scale-110' : 'border-cyan-500 shadow-2xl shadow-cyan-500/20'}`}>
+            <div 
+              onClick={startVoiceSession} 
+              className={`w-24 h-24 shrink-0 rounded-full border-2 cursor-pointer overflow-hidden transition-all duration-500 ${isListening ? 'border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.6)] scale-110 active:scale-100' : 'border-cyan-500 shadow-2xl shadow-cyan-500/20 hover:scale-105 active:scale-95'}`}
+            >
                <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
             </div>
             <div className="flex-1">
@@ -368,7 +441,13 @@ const App: React.FC = () => {
           setTravel(p => ({ ...p, destination: n.toUpperCase(), destinationCoords: [la, ln], stops: [] }));
           setIsAddStopModalOpen(false);
       }} />
-      <SettingsMenu isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={{userName: 'Elivam', voiceVolume: 90, privacyMode: false, safetyDistance: 30, alertVoiceEnabled: true, preferredMusicApp: 'spotify', preferredVideoApp: 'stremio', credentials: []}} onUpdate={() => {}} mediaApps={APP_DATABASE} />
+      <SettingsMenu 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)} 
+        settings={settings} 
+        onUpdate={(newSettings) => setSettings(newSettings)} 
+        mediaApps={APP_DATABASE} 
+      />
       
       <style>{`
          @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
