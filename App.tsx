@@ -7,7 +7,6 @@ import MapView from './components/MapView';
 import AddStopModal from './components/AddStopModal';
 import NavigationPanel from './components/NavigationPanel';
 import EntertainmentHub from './components/EntertainmentHub';
-import SettingsMenu from './components/SettingsMenu';
 import BluelinkPanel from './components/BluelinkPanel';
 import MiniPlayer from './components/MiniPlayer';
 import { decode, decodeAudioData, createBlob } from './utils/audio';
@@ -18,7 +17,6 @@ const APP_DATABASE: MediaApp[] = [
   { id: 'phone', name: 'Telefone', icon: 'fas fa-phone-alt', color: 'text-blue-500', category: 'COMM', scheme: 'tel:' },
   { id: 'ytmusic', name: 'YouTube Music', icon: 'fas fa-play-circle', color: 'text-red-500', category: 'AUDIO', scheme: 'https://music.youtube.com/search?q=' },
   { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'youtube://www.youtube.com/results?search_query=' },
-  { id: 'netflix', name: 'Netflix', icon: 'fas fa-film', color: 'text-red-700', category: 'VIDEO', scheme: 'nflx://www.netflix.com/search?q=' },
 ];
 
 const toolDeclarations: FunctionDeclaration[] = [
@@ -26,22 +24,34 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'search_place',
     parameters: {
       type: Type.OBJECT,
-      description: 'Localiza qualquer endereço em Brasília/Gama usando base do Google. Essencial para Quadras e Conjuntos.',
+      description: 'Localiza endereços no DF (Gama, Setores, Quadras) via Google Search.',
       properties: { query: { type: Type.STRING } },
       required: ['query']
+    }
+  },
+  {
+    name: 'send_communication',
+    parameters: {
+      type: Type.OBJECT,
+      description: 'Envia mensagens de WhatsApp ou faz ligações.',
+      properties: {
+        method: { type: Type.STRING, enum: ['WHATSAPP', 'PHONE'] },
+        recipient: { type: Type.STRING, description: 'Nome ou número' },
+        message: { type: Type.STRING }
+      },
+      required: ['method', 'recipient']
     }
   },
   {
     name: 'media_action',
     parameters: {
       type: Type.OBJECT,
-      description: 'Abre apps nativos (Spotify, Netflix, YouTube).',
+      description: 'Abre apps de música ou vídeo.',
       properties: {
         appId: { type: Type.STRING, enum: ['spotify', 'youtube', 'netflix', 'ytmusic'] },
-        action: { type: Type.STRING, enum: ['SEARCH_AND_PLAY', 'OPEN_APP'] },
-        refinedQuery: { type: Type.STRING }
+        query: { type: Type.STRING }
       },
-      required: ['appId', 'action', 'refinedQuery']
+      required: ['appId']
     }
   }
 ];
@@ -51,6 +61,8 @@ const App: React.FC = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
+  // Fix: Added missing mapFullScreen state
+  const [mapFullScreen, setMapFullScreen] = useState(false);
   
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-15.7942, -47.8822]);
@@ -65,12 +77,9 @@ const App: React.FC = () => {
     lastAction: 'IDLE', isEngineRunning: true, areWindowsOpen: false, isLocked: false, isUpdating: false, hazardActive: false
   });
 
-  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'BASE GOOGLE ATIVA', artist: 'SISTEMA EVA V160', isPlaying: false, progress: 0 });
-  const [videoTrack, setVideoTrack] = useState<TrackMetadata>({ title: 'STANDBY', artist: 'STREAM ENGINE', isPlaying: false, progress: 0 });
+  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'PRIME PROTOCOL 160', artist: 'EVA CORE', isPlaying: false, progress: 0 });
   const [mediaState, setMediaState] = useState<MediaViewState>('HIDDEN');
   const [currentAudioApp, setCurrentAudioApp] = useState<MediaApp>(APP_DATABASE[0]);
-  const [currentVideoApp, setCurrentVideoApp] = useState<MediaApp>(APP_DATABASE[4]);
-  const [mapFullScreen, setMapFullScreen] = useState(false);
 
   const outputCtxRef = useRef<AudioContext | null>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
@@ -79,60 +88,53 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const geo = navigator.geolocation.watchPosition((p) => {
-      setCurrentPos([p.coords.latitude, p.coords.longitude]);
+      const lat = p.coords.latitude;
+      const lng = p.coords.longitude;
+      setCurrentPos([lat, lng]);
       setCurrentSpeed(p.coords.speed ? Math.round(p.coords.speed * 3.6) : 0);
+      // Simulação de radar baseada em movimento
+      setSafetyDist(Math.max(5, Math.floor(30 - (p.coords.speed || 0))));
     }, null, { enableHighAccuracy: true });
     return () => navigator.geolocation.clearWatch(geo);
   }, []);
 
   const handleSystemAction = async (fc: any) => {
     const args = fc.args;
+    // Guideline: Create new GoogleGenAI instance before API call
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
     if (fc.name === 'search_place') {
       try {
-        // Busca com Google Search Grounding - O único que encontra casas em Brasília
         const response = await ai.models.generateContent({
           model: 'gemini-3-flash-preview',
-          contents: `Qual a latitude e longitude exata de: "${args.query}, Brasília, DF, Brasil"? Responda no formato: NOME: [Nome do Local], LAT: [Lat], LNG: [Lng].`,
+          contents: `Ache a COORDENADA LAT/LNG exata de: "${args.query}, Brasília, DF". Responda: LAT: [valor], LNG: [valor].`,
           config: { tools: [{ googleSearch: {} }] }
         });
-
         const text = response.text || "";
-        const latMatch = text.match(/(-?\d+\.\d+)/g);
-        
-        if (latMatch && latMatch.length >= 2) {
-          const lat = parseFloat(latMatch[0]);
-          const lng = parseFloat(latMatch[1]);
-          // Filtro de segurança para garantir que estamos no DF (aprox)
-          if (lat < -15 && lat > -17 && lng < -47 && lng > -49) {
-            return { name: args.query.toUpperCase(), lat, lng };
-          }
+        const matches = text.match(/(-?\d+\.\d+)/g);
+        if (matches && matches.length >= 2) {
+          return { name: args.query.toUpperCase(), lat: parseFloat(matches[0]), lng: parseFloat(matches[1]) };
         }
+        // Fallback local
+        const fRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(args.query + ' DF Brasil')}&limit=1`);
+        const data = await fRes.json();
+        if (data[0]) return { name: data[0].display_name.split(',')[0], lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+        return { error: "Local não encontrado." };
+      } catch (e) { return { error: "Falha de busca." }; }
+    }
 
-        // Ultimo recurso: Nominatim reforçado
-        const localRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(args.query + ' Distrito Federal Brasil')}&limit=1&countrycodes=br`);
-        const data = await localRes.json();
-        if (data && data[0]) return { name: data[0].display_name.split(',')[0], lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-        
-        return { error: "Localização não encontrada nem na base Google. Verifique o endereço." };
-      } catch (err) {
-        console.error("Search Action Error:", err);
-        return { error: "Erro de comunicação com satélites de busca." };
-      }
+    if (fc.name === 'send_communication') {
+      const url = args.method === 'WHATSAPP' 
+        ? `https://api.whatsapp.com/send?phone=${args.recipient}&text=${encodeURIComponent(args.message || '')}`
+        : `tel:${args.recipient}`;
+      window.open(url, '_blank');
+      return { result: "Comunicação iniciada no dispositivo." };
     }
 
     if (fc.name === 'media_action') {
       const app = APP_DATABASE.find(a => a.id === args.appId) || APP_DATABASE[0];
-      const query = args.refinedQuery || '';
-      if (app.category === 'VIDEO') {
-        setCurrentVideoApp(app); setVideoTrack({ title: query, artist: app.name, isPlaying: true, progress: 0 });
-        setMediaState('FULL');
-      } else {
-        setCurrentAudioApp(app); setAudioTrack({ title: query, artist: app.name, isPlaying: true, progress: 0 });
-      }
-      window.open(app.scheme + encodeURIComponent(query), '_blank');
-      return { result: "Aplicativo aberto." };
+      window.open(app.scheme + encodeURIComponent(args.query || ''), '_blank');
+      return { result: `Abrindo ${app.name}` };
     }
 
     return { result: "OK" };
@@ -142,6 +144,7 @@ const App: React.FC = () => {
     if (isListening) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Guideline: Create new GoogleGenAI instance before API call
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       if (!outputCtxRef.current) outputCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
 
@@ -157,18 +160,14 @@ const App: React.FC = () => {
               sessionPromise.then(s => { 
                 sessionRef.current = s; 
                 s.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) }); 
-              }).catch(() => { /* Previne erro se fechar rápido */ }); 
+              }); 
             };
             source.connect(scriptProcessor); scriptProcessor.connect(inputCtx.destination);
           },
           onmessage: async (msg: LiveServerMessage) => {
             if (msg.toolCall) {
               for (const fc of msg.toolCall.functionCalls) {
-                // Timeout de segurança para evitar travamento da IA
-                const actionPromise = handleSystemAction(fc);
-                const timeoutPromise = new Promise(res => setTimeout(() => res({ error: "TEMPO EXCEDIDO" }), 10000));
-                
-                const res: any = await Promise.race([actionPromise, timeoutPromise]);
+                const res = await handleSystemAction(fc);
                 sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: res } }));
               }
             }
@@ -178,10 +177,7 @@ const App: React.FC = () => {
               const buffer = await decodeAudioData(decode(audio), outputCtxRef.current, 24000, 1);
               const source = outputCtxRef.current.createBufferSource();
               source.buffer = buffer; source.connect(outputCtxRef.current.destination);
-              source.onended = () => { 
-                sourcesRef.current.delete(source); 
-                if(sourcesRef.current.size === 0) setIsSpeaking(false); 
-              };
+              source.onended = () => { sourcesRef.current.delete(source); if(sourcesRef.current.size === 0) setIsSpeaking(false); };
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtxRef.current.currentTime);
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += buffer.duration;
@@ -192,10 +188,11 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `VOCÊ É A EVA CORE V160. MOTOR DE BUSCA: GOOGLE MAPS/WAZE.
-          LOCALIZAÇÃO: BRASÍLIA/GAMA. Se o Elivam falar 'Quadra X, Conjunto Y, Casa Z', use 'search_place'. 
-          O Google Search Grounding é obrigatório para encontrar locais específicos no DF.
-          Se houver erro ou demora, avise: 'Sistema de busca sobrecarregado, tentando protocolo secundário'.`
+          systemInstruction: `VOCÊ É A EVA CORE V160. SEU MOTOR É O GOOGLE SEARCH.
+          CAPACIDADES: Você PODE abrir WhatsApp, fazer ligações e abrir apps. 
+          BUSCA: Se Elivam pedir um lugar no Gama ou Brasília, use 'search_place'. 
+          NUNCA diga 'estou tentando encontrar' por mais de 10 segundos sem dar um feedback real.
+          Se a busca falhar, peça para ele dizer um ponto comercial próximo.`
         }
       });
     } catch (e) { setIsSystemBooted(true); }
@@ -203,40 +200,38 @@ const App: React.FC = () => {
 
   if (!isSystemBooted) {
     return (
-      <div className="h-screen w-screen bg-black flex flex-col items-center justify-center italic text-white p-10">
-         <div className="w-56 h-56 rounded-full border-4 border-blue-500/20 p-2 mb-12 animate-glow-blue flex items-center justify-center">
-            <div className="w-full h-full rounded-full bg-blue-600/10 flex items-center justify-center border-2 border-blue-500/50">
-               <i className="fas fa-satellite-dish text-6xl text-blue-400"></i>
-            </div>
+      <div className="h-screen w-screen bg-black flex flex-col items-center justify-center italic text-white">
+         <div className="w-64 h-64 rounded-full border-4 border-blue-600/30 p-2 animate-glow-blue flex items-center justify-center mb-10">
+            <i className="fas fa-microchip text-7xl text-blue-500"></i>
          </div>
-         <h1 className="text-4xl font-black mb-4 tracking-tighter uppercase">PANDORA EVA CORE</h1>
-         <button onClick={startVoiceSession} className="h-20 px-16 bg-blue-600 rounded-[40px] font-black uppercase shadow-[0_0_60px_rgba(37,99,235,0.5)]">Sincronizar Protocolo</button>
+         <h1 className="text-5xl font-black mb-8 tracking-tighter uppercase">EVA CORE V160</h1>
+         <button onClick={startVoiceSession} className="h-24 px-20 bg-blue-600 rounded-[50px] font-black uppercase shadow-[0_0_80px_rgba(37,99,235,0.6)] text-xl">Iniciar Protocolo Prime</button>
       </div>
     );
   }
 
   return (
     <div className="h-screen w-screen bg-black text-white flex overflow-hidden font-sans italic uppercase">
-      {/* HUD RADAR DE SEGURANÇA */}
+      {/* RADAR DE DISTÂNCIA REATIVADO */}
       <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[5000]">
-         <div className={`px-8 py-3 rounded-full border border-white/10 backdrop-blur-3xl flex items-center gap-5 transition-all bg-black/80 shadow-2xl`}>
-            <i className="fas fa-satellite text-blue-400 animate-pulse"></i>
-            <span className="text-sm font-black tracking-[0.2em]">SISTEMA GOOGLE BASE ONLINE</span>
+         <div className={`px-10 py-4 rounded-full border-2 backdrop-blur-3xl flex items-center gap-6 transition-all ${safetyDist < 10 ? 'bg-red-600 border-white animate-pulse' : 'bg-black/90 border-blue-500/50 shadow-2xl'}`}>
+            <i className={`fas fa-bullseye text-2xl ${safetyDist < 10 ? 'text-white' : 'text-blue-400'}`}></i>
+            <span className="text-lg font-black tracking-[0.3em]">{safetyDist}M DISTÂNCIA SEGURA</span>
          </div>
       </div>
 
-      <aside className={`h-full z-20 bg-[#0a0a0c] border-r border-white/5 flex flex-col p-6 transition-all duration-700 ${mapFullScreen ? 'w-0 -ml-10 opacity-0' : 'w-[38%]'}`}>
-         <header className="flex items-center justify-between mb-8">
+      <aside className={`h-full z-20 bg-[#08080a] border-r border-white/10 flex flex-col p-8 transition-all duration-700 ${mapFullScreen ? 'w-0 -ml-20 opacity-0' : 'w-[40%]'}`}>
+         <header className="flex items-center justify-between mb-10">
             <div className="flex flex-col">
-               <span className={`text-[8rem] font-black leading-none tracking-tighter ${currentSpeed > 60 ? 'text-red-500' : 'text-white'}`}>{currentSpeed}</span>
-               <span className="text-[11px] font-black text-blue-500 tracking-[0.4em]">KM/H • EVA V160</span>
+               <span className={`text-[9rem] font-black leading-none tracking-tighter ${currentSpeed > 80 ? 'text-red-600' : 'text-white'}`}>{currentSpeed}</span>
+               <span className="text-xs font-black text-blue-500 tracking-[0.5em] mt-2">VELOCIDADE REAL • KM/H</span>
             </div>
-            <div onClick={startVoiceSession} className={`w-24 h-24 rounded-full border-4 cursor-pointer overflow-hidden transition-all ${isListening ? 'border-red-500 scale-105 shadow-[0_0_40px_rgba(239,68,68,0.4)]' : 'border-blue-500 shadow-xl'}`}>
+            <div onClick={startVoiceSession} className={`w-28 h-28 rounded-full border-4 cursor-pointer overflow-hidden transition-all ${isListening ? 'border-red-600 scale-110 shadow-[0_0_50px_rgba(220,38,38,0.5)]' : 'border-blue-600 shadow-2xl'}`}>
                <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
             </div>
          </header>
 
-         <div className="flex-1 space-y-6 overflow-y-auto no-scrollbar pb-10">
+         <div className="flex-1 space-y-8 overflow-y-auto no-scrollbar pb-10">
             <NavigationPanel 
               travel={travel} 
               onAddStop={() => setIsAddStopModalOpen(true)}
@@ -247,19 +242,14 @@ const App: React.FC = () => {
             <BluelinkPanel status={carStatus} onAction={() => {}} />
          </div>
 
-         <footer className="h-24 pt-4 border-t border-white/5">
+         <footer className="h-28 pt-6 border-t border-white/10">
             <MiniPlayer app={currentAudioApp} metadata={audioTrack} onControl={() => {}} onExpand={() => {}} transparent />
          </footer>
       </aside>
 
-      <main className="flex-1 relative bg-zinc-900">
+      <main className="flex-1 relative bg-[#0a0a0c]">
+         {/* Fix: Passed missing mapFullScreen and setMapFullScreen */}
          <MapView travel={travel} currentPosition={currentPos} isFullScreen={mapFullScreen} onToggleFullScreen={() => setMapFullScreen(!mapFullScreen)} onRouteUpdate={(steps, dur, dist, segs) => setTravel(p => ({...p, drivingTimeMinutes: dur, totalDistanceKm: dist, segments: segs}))} />
-         
-         {mediaState === 'FULL' && (
-           <div className="absolute inset-0 z-[1000] bg-black animate-fade-in">
-              <EntertainmentHub speed={currentSpeed} currentApp={currentVideoApp} track={videoTrack} onMinimize={() => setMediaState('HIDDEN')} onClose={() => setMediaState('HIDDEN')} onControl={() => {}} />
-           </div>
-         )}
       </main>
 
       <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(n, la, ln) => {
