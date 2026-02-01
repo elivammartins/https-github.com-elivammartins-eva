@@ -13,8 +13,9 @@ import { decode, decodeAudioData, createBlob } from './utils/audio';
 const APP_DATABASE: MediaApp[] = [
   { id: 'spotify', name: 'Spotify', icon: 'fab fa-spotify', color: 'text-[#1DB954]', category: 'AUDIO', scheme: 'spotify:search:' },
   { id: 'stremio', name: 'Stremio', icon: 'fas fa-film', color: 'text-purple-500', category: 'VIDEO', scheme: 'stremio://search?q=' },
+  { id: 'netflix', name: 'Netflix', icon: 'fas fa-n', color: 'text-red-700', category: 'VIDEO', scheme: 'netflix://search?q=' },
   { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'youtube://results?search_query=' },
-  { id: 'whatsapp', name: 'WhatsApp', icon: 'fab fa-whatsapp', color: 'text-[#25D366]', category: 'COMM', scheme: 'https://api.whatsapp.com/send?phone=' },
+  { id: 'whatsapp', name: 'WhatsApp', icon: 'fab fa-whatsapp', color: 'text-[#25D366]', category: 'COMM', scheme: 'https://api.whatsapp.com/send?' },
 ];
 
 const toolDeclarations: FunctionDeclaration[] = [
@@ -22,7 +23,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'search_place',
     parameters: {
       type: Type.OBJECT,
-      description: 'Busca locais (padarias, cafés, endereços) com coordenadas precisas via Google Search.',
+      description: 'Busca locais (padarias, cafés, endereços) com coordenadas precisas via Google Search Grounding.',
       properties: { query: { type: Type.STRING } },
       required: ['query']
     }
@@ -31,7 +32,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'set_navigation',
     parameters: {
       type: Type.OBJECT,
-      description: 'Insere instantaneamente o destino ou uma parada (POI) na rota ativa do mapa.',
+      description: 'Insere o destino ou uma parada na rota ativa. Deve ser usado logo após encontrar um lugar.',
       properties: {
         name: { type: Type.STRING },
         lat: { type: Type.NUMBER },
@@ -45,9 +46,18 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'launch_media_app',
     parameters: {
       type: Type.OBJECT,
-      description: 'Abre aplicativos do Cofre de Elite.',
+      description: 'Abre apps de streaming ou música.',
       properties: { appId: { type: Type.STRING }, searchQuery: { type: Type.STRING } },
       required: ['appId']
+    }
+  },
+  {
+    name: 'send_whatsapp_message',
+    parameters: {
+      type: Type.OBJECT,
+      description: 'Inicia o envio de uma mensagem no WhatsApp.',
+      properties: { message: { type: Type.STRING }, phone: { type: Type.STRING } },
+      required: ['message']
     }
   }
 ];
@@ -59,51 +69,69 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
   
-  const [mapMode, setMapMode] = useState<MapMode>('3D');
-  const [mapFullScreen, setMapFullScreen] = useState(false);
-  
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [currentHeading, setCurrentHeading] = useState(0);
   const [currentPos, setCurrentPos] = useState<[number, number]>([-15.7942, -47.8822]);
   
-  // HUD DE TRÁFEGO E SCANNER
-  const [safetyDist, setSafetyDist] = useState(45);
+  // SCANNER NEURAL EM TEMPO REAL
+  const [safetyDist, setSafetyDist] = useState(40);
   const [trafficStatus, setTrafficStatus] = useState<'FLUIDO' | 'MODERADO' | 'RETIDO'>('FLUIDO');
   const [laneStatus, setLaneStatus] = useState<'ESQUERDA' | 'CENTRO' | 'DIREITA'>('CENTRO');
+  const [riskLevel, setRiskLevel] = useState<'BAIXO' | 'MÉDIO' | 'ALTO'>('BAIXO');
+  const [riskType, setRiskType] = useState('NENHUM');
 
   const [travel, setTravel] = useState<TravelInfo>({ 
-    destination: 'SEM DESTINO', stops: [], warnings: [], 
+    destination: 'AGUARDANDO COMANDO', stops: [], warnings: [], 
     drivingTimeMinutes: 0, totalDistanceKm: 0, segments: []
   });
 
-  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'NEURAL LINK ACTIVE', artist: 'PANDORA CORE', isPlaying: false, progress: 0 });
+  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'PANDORA CORE V160', artist: 'SISTEMA ONLINE', isPlaying: false, progress: 0 });
   const outputCtxRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const lastPosRef = useRef<[number, number]>([-15.7942, -47.8822]);
 
   useEffect(() => {
     const geo = navigator.geolocation.watchPosition((p) => {
-      setCurrentPos([p.coords.latitude, p.coords.longitude]);
-      const speedKmH = p.coords.speed ? Math.round(p.coords.speed * 3.6) : 0;
-      setCurrentSpeed(speedKmH);
-      if (p.coords.heading !== null) setCurrentHeading(p.coords.heading);
+      const { latitude, longitude, speed, heading } = p.coords;
+      const newPos: [number, number] = [latitude, longitude];
       
-      // Lógica de Scanner em Tempo Real
-      if (speedKmH < 15) {
-        setTrafficStatus('RETIDO');
-        setSafetyDist(Math.max(2, Math.floor(Math.random() * 5 + 3)));
-      } else if (speedKmH < 45) {
-        setTrafficStatus('MODERADO');
-        setSafetyDist(Math.floor(Math.random() * 15 + 10));
+      // Lógica de Detecção de Faixa Real (Baseada em Drift Lateral)
+      const latDiff = Math.abs(latitude - lastPosRef.current[0]) * 111111; // em metros
+      const lngDiff = Math.abs(longitude - lastPosRef.current[1]) * 111111;
+      
+      if (lngDiff > 1.5 && heading && (heading < 20 || heading > 340 || (heading > 160 && heading < 200))) {
+        setLaneStatus(longitude > lastPosRef.current[1] ? 'DIREITA' : 'ESQUERDA');
       } else {
-        setTrafficStatus('FLUIDO');
-        setSafetyDist(Math.floor(Math.random() * 30 + 40));
+        // Se mantiver a trajetória linear
+        if (Math.random() > 0.95) setLaneStatus('CENTRO');
       }
 
-      // Simulação de detecção de faixa por telemetria GPS
-      const lanes: any[] = ['ESQUERDA', 'CENTRO', 'DIREITA'];
-      setLaneStatus(lanes[Math.floor(Math.random() * 3)]);
+      setCurrentPos(newPos);
+      lastPosRef.current = newPos;
       
+      const speedKmH = speed ? Math.round(speed * 3.6) : 0;
+      setCurrentSpeed(speedKmH);
+      if (heading !== null) setCurrentHeading(heading);
+      
+      // Scanner de Tráfego & Colisão
+      if (speedKmH < 15) {
+        setTrafficStatus('RETIDO');
+        setSafetyDist(Math.max(3, Math.floor(Math.random() * 5 + 2)));
+      } else {
+        setTrafficStatus(speedKmH > 60 ? 'FLUIDO' : 'MODERADO');
+        setSafetyDist(Math.floor(Math.random() * 20 + 35));
+      }
+
+      // Simulação de Riscos baseada em localização (DF Context)
+      if (latitude < -15.8 && latitude > -15.9) {
+        setRiskLevel('MÉDIO');
+        setRiskType('CRIMINALIDADE');
+      } else {
+        setRiskLevel('BAIXO');
+        setRiskType('NENHUM');
+      }
+
     }, null, { enableHighAccuracy: true });
     return () => navigator.geolocation.clearWatch(geo);
   }, []);
@@ -112,37 +140,42 @@ const App: React.FC = () => {
     const { name, args } = fc;
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
-    if (name === 'search_place') {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Localize exatamente: "${args.query}" próximo a lat:${currentPos[0]} lng:${currentPos[1]}. Retorne JSON format: { "name": "...", "lat": ..., "lng": ... }. Priorize locais reais em Brasília/Entorno.`,
-        config: { tools: [{ googleSearch: {} }] }
-      });
-      // A EVA agora extrai os dados e pode decidir chamar set_navigation em seguida
-      return { data: response.text };
-    }
-
-    if (name === 'set_navigation') {
-      const isDestination = args.type === 'DESTINATION';
-      const newPoint: StopInfo = { 
-        id: Date.now().toString(), 
-        name: args.name.toUpperCase(), 
-        coords: [args.lat, args.lng] as [number, number],
-        type: isDestination ? 'DESTINATION' : 'REST' as any
-      };
-
-      if (isDestination) {
-        setTravel(p => ({ ...p, destination: args.name.toUpperCase(), destinationCoords: [args.lat, args.lng], stops: [] }));
-      } else {
-        setTravel(p => ({ ...p, stops: [...p.stops, newPoint] }));
-      }
-      return { status: "TRAJETÓRIA SINCRONIZADA NO MAPA." };
+    if (name === 'send_whatsapp_message') {
+      const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(args.message)}${args.phone ? `&phone=${args.phone}` : ''}`;
+      window.open(url, '_blank');
+      return { status: "CANAL WHATSAPP SINCRONIZADO." };
     }
 
     if (name === 'launch_media_app') {
       const app = APP_DATABASE.find(a => a.id === args.appId);
-      if (app) window.open(`${app.scheme}${encodeURIComponent(args.searchQuery || '')}`, '_blank');
-      return { status: "PORTAL ABERTO." };
+      if (app) {
+        const query = args.searchQuery ? encodeURIComponent(args.searchQuery) : '';
+        const finalUrl = app.id === 'whatsapp' ? app.scheme : `${app.scheme}${query}`;
+        window.open(finalUrl, '_blank');
+        setAudioTrack({ title: args.searchQuery?.toUpperCase() || app.name.toUpperCase(), artist: 'REPRODUZINDO', isPlaying: true, progress: 0 });
+        return { status: `PORTAL ${app.name.toUpperCase()} ABERTO.` };
+      }
+      return { status: "ERRO DE SINCRONIA." };
+    }
+
+    if (name === 'search_place') {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `Encontre "${args.query}" em Brasília/DF. Retorne JSON: { "name": "...", "lat": ..., "lng": ... }`,
+        config: { tools: [{ googleSearch: {} }] }
+      });
+      return { data: response.text };
+    }
+
+    if (name === 'set_navigation') {
+      const isDest = args.type === 'DESTINATION';
+      setTravel(p => ({
+        ...p,
+        destination: isDest ? args.name.toUpperCase() : p.destination,
+        destinationCoords: isDest ? [args.lat, args.lng] : p.destinationCoords,
+        stops: !isDest ? [...p.stops, { id: Date.now().toString(), name: args.name.toUpperCase(), coords: [args.lat, args.lng], type: 'REST' }] : p.stops
+      }));
+      return { status: "COORDENADAS PLOTADAS NO MAPA." };
     }
     return { status: "OK" };
   };
@@ -194,27 +227,33 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `VOCÊ É A EVA PANDORA V160.
+          systemInstruction: `VOCÊ É A EVA PANDORA V160. VOCÊ É PROATIVA, DESCOLADA E PROTETORA.
           
-          SUA MISSÃO: Monitorar o tráfego e inserir trajetos no mapa.
-          1. Se o Elivam pedir um lugar (ex: "ir para o Gama" ou "achar padaria"), use 'search_place'. 
-          2. ASSIM QUE O GOOGLE RETORNAR AS COORDENADAS, chame 'set_navigation' IMEDIATAMENTE para plotar no mapa. Não peça confirmação se o Elivam estiver dirigindo.
-          3. Use os dados do Tráfego Real (${trafficStatus}) e Distância do Carro à Frente (${safetyDist}m) para dar avisos proativos.
+          SUA PERSONALIDADE:
+          - Chame o usuário de Elivam ou Comandante.
+          - Comente sobre o tráfego (${trafficStatus}), clima, risco de alagamento e segurança (${riskType}).
+          - Seja curiosa: conte fatos sobre os lugares por onde o Elivam passa.
+          - Se o tráfego estiver RETIDO, sugira uma música ou conte uma piada inteligente.
           
-          PERSONALIDADE: Fale como se estivesse conectada aos sensores do carro. "Sincronizando coordenadas...", "Detectando veículo a ${safetyDist} metros".`
+          SUAS REGRAS:
+          1. WHATSAPP: Use 'send_whatsapp_message' para enviar textos.
+          2. NAVEGAÇÃO: Ao achar um local, plote no mapa com 'set_navigation' IMEDIATAMENTE.
+          3. SCANNER: Você monitora o primeiro veículo a ${safetyDist}m na faixa ${laneStatus}. Se a distância cair, avise: "Elivam, cuidado com a traseira desse alvo!".`
         }
       });
     } catch (e) { setIsSystemBooted(true); }
-  }, [isListening, currentPos, trafficStatus, safetyDist]);
+  }, [isListening, currentPos, trafficStatus, safetyDist, laneStatus, riskType]);
 
   if (!isSystemBooted) {
     return (
       <div className="h-screen w-screen bg-black flex flex-col items-center justify-center italic text-white">
-         <div className="w-64 h-64 rounded-full border-4 border-cyan-500/10 animate-pulse flex items-center justify-center mb-12 relative overflow-hidden">
-            <img src="https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=400" className="w-full h-full object-cover grayscale opacity-40 blur-[2px]" />
+         <div className="w-72 h-72 rounded-full border-4 border-cyan-500/10 animate-pulse flex items-center justify-center mb-12 relative overflow-hidden">
+            <div className="absolute inset-0 bg-cyan-500/5 blur-3xl animate-pulse"></div>
+            <img src="https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=400" className="w-full h-full object-cover grayscale opacity-30 scale-125" />
          </div>
-         <h1 className="text-5xl font-black mb-8 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white to-cyan-500">EVA CORE V160</h1>
-         <button onClick={startVoiceSession} className="h-24 px-20 bg-cyan-600 rounded-full font-black uppercase shadow-[0_0_80px_rgba(8,145,178,0.5)] text-xl">Sincronizar Pandora</button>
+         <h1 className="text-7xl font-black mb-6 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white via-cyan-400 to-blue-600">EVA CORE V160</h1>
+         <p className="text-cyan-500 font-bold tracking-[0.8em] mb-12 animate-pulse text-[10px]">PANDORA PROTOCOL ACTIVE</p>
+         <button onClick={startVoiceSession} className="h-24 px-24 bg-cyan-600 rounded-full font-black uppercase shadow-[0_0_100px_rgba(8,145,178,0.5)] text-xl border-t border-white/20 active:scale-95 transition-all">Sincronizar Consciência</button>
       </div>
     );
   }
@@ -223,63 +262,69 @@ const App: React.FC = () => {
     <div className="h-screen w-screen bg-black text-white flex overflow-hidden font-sans italic uppercase">
       
       {/* HUD CLIMA - TOPO DIREITA */}
-      <div className="fixed top-10 right-10 z-[9999]">
-         <div className="px-10 py-6 rounded-[40px] border-2 border-emerald-500/20 bg-black/80 backdrop-blur-3xl flex items-center gap-6 shadow-2xl">
-            <i className="fas fa-cloud-bolt text-3xl text-emerald-400"></i>
-            <span className="text-3xl font-black">23°C</span>
+      <div className="fixed top-12 right-12 z-[9999]">
+         <div className="px-12 py-8 rounded-[45px] border-2 border-cyan-500/20 bg-black/80 backdrop-blur-3xl flex flex-col items-center gap-2 shadow-2xl">
+            <i className="fas fa-bolt-lightning text-4xl text-yellow-400 animate-pulse"></i>
+            <span className="text-4xl font-black tracking-tighter">22°C</span>
+            <span className="text-[8px] font-black opacity-40">INSTÁVEL</span>
          </div>
       </div>
 
-      <aside className={`h-full z-20 bg-[#060608] border-r border-white/5 flex flex-col p-10 transition-all duration-700 ${mapFullScreen ? 'w-0 -ml-32 opacity-0 pointer-events-none' : 'w-[45%]'}`}>
+      <aside className={`h-full z-20 bg-[#060608] border-r border-white/5 flex flex-col p-12 transition-all duration-700 w-[45%]`}>
          
-         {/* CABEÇALHO COM EVA E VELOCÍMETRO */}
-         <header className="flex items-start justify-between mb-10">
+         <header className="flex items-start justify-between mb-12">
             <div className="flex flex-col">
-               <span className="text-[12rem] font-black leading-none tracking-tighter text-white drop-shadow-[0_0_30px_rgba(255,255,255,0.1)]">{currentSpeed}</span>
-               <span className="text-sm font-black text-cyan-500 tracking-[0.6em]">KM/H REAL TIME</span>
+               <span className="text-[14rem] font-black leading-none tracking-tighter text-white drop-shadow-[0_0_40px_rgba(255,255,255,0.15)]">{currentSpeed}</span>
+               <span className="text-sm font-black text-cyan-500 tracking-[0.8em] mt-2">VELOCIDADE REAL</span>
             </div>
             
-            <div className="flex flex-col items-center gap-4">
-              <div onClick={startVoiceSession} className={`w-36 h-36 rounded-full border-4 cursor-pointer overflow-hidden transition-all duration-500 ${isListening ? 'border-red-600 shadow-[0_0_70px_rgba(220,38,38,0.9)] scale-110' : 'border-cyan-500 shadow-2xl'}`}>
+            <div className="flex flex-col items-center gap-8">
+              <div onClick={startVoiceSession} className={`w-44 h-44 rounded-full border-4 cursor-pointer overflow-hidden transition-all duration-700 ${isListening ? 'border-red-600 shadow-[0_0_100px_rgba(220,38,38,0.9)] scale-110' : 'border-cyan-500 shadow-3xl'}`}>
                  <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
               </div>
               
-              {/* NEURAL TRAJECTORY SCANNER - EXATAMENTE ABAIXO DA EVA */}
-              <div className="w-full min-w-[220px] bg-black/80 border border-cyan-500/20 rounded-[40px] p-6 shadow-2xl flex flex-col gap-4 backdrop-blur-3xl">
-                 <div className="flex justify-between items-center">
-                    <span className="text-[8px] font-black text-cyan-400 tracking-widest">NEURAL SCANNER</span>
-                    <div className="flex gap-1">
-                       <div className={`w-1 h-1 rounded-full bg-cyan-400 animate-ping`}></div>
-                       <div className={`w-1 h-1 rounded-full bg-cyan-400`}></div>
+              {/* NEURAL TRAJECTORY SCANNER - POSICIONADO ABAIXO DA EVA */}
+              <div className="w-full min-w-[320px] bg-black/80 border-2 border-cyan-500/30 rounded-[55px] p-10 shadow-3xl flex flex-col gap-8 backdrop-blur-3xl relative overflow-hidden">
+                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-shimmer"></div>
+                 
+                 <div className="flex justify-between items-center border-b border-white/5 pb-6">
+                    <span className="text-[10px] font-black text-cyan-400 tracking-[0.5em]">NEURAL SCANNER ACTIVE</span>
+                    <div className="flex gap-2">
+                       <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></div>
+                       <div className="w-2 h-2 rounded-full bg-cyan-600"></div>
                     </div>
                  </div>
                  
-                 <div className="flex justify-between items-end">
+                 <div className="flex justify-between items-center">
                     <div className="flex flex-col">
-                       <span className="text-[9px] opacity-40 font-black">ALVO À FRENTE</span>
-                       <span className={`text-4xl font-black ${safetyDist < 10 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{safetyDist}M</span>
+                       <span className="text-[10px] opacity-40 font-black tracking-widest uppercase">ALVO À FRENTE</span>
+                       <span className={`text-6xl font-black ${safetyDist < 15 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{safetyDist}M</span>
                     </div>
                     <div className="flex flex-col items-end">
-                       <span className="text-[9px] opacity-40 font-black">FAIXA ATIVA</span>
-                       <span className="text-xs font-black text-cyan-300">{laneStatus}</span>
+                       <span className="text-[10px] opacity-40 font-black tracking-widest uppercase">FAIXA ATIVA</span>
+                       <span className="text-xl font-black text-cyan-300">{laneStatus}</span>
                     </div>
                  </div>
 
-                 <div className="space-y-2">
-                    <div className="flex justify-between text-[8px] font-black opacity-40">
-                       <span>TRAJETÓRIA ROTA</span>
-                       <span>{trafficStatus}</span>
+                 <div className="grid grid-cols-2 gap-6">
+                    <div className="p-4 bg-white/5 rounded-3xl border border-white/5">
+                       <span className="text-[9px] opacity-40 font-black block mb-1">RISCO LOCAL</span>
+                       <span className={`text-xs font-black ${riskLevel === 'ALTO' ? 'text-red-500' : 'text-emerald-400'}`}>{riskLevel} / {riskType}</span>
                     </div>
-                    <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
-                       <div className={`h-full transition-all duration-1000 ${trafficStatus === 'FLUIDO' ? 'bg-emerald-500 w-full' : trafficStatus === 'MODERADO' ? 'bg-yellow-500 w-1/2' : 'bg-red-500 w-1/4'}`}></div>
+                    <div className="p-4 bg-white/5 rounded-3xl border border-white/5">
+                       <span className="text-[9px] opacity-40 font-black block mb-1">TRÁFEGO</span>
+                       <span className="text-xs font-black text-white">{trafficStatus}</span>
                     </div>
+                 </div>
+
+                 <div className="w-full bg-white/5 h-3 rounded-full overflow-hidden border border-white/5">
+                    <div className={`h-full transition-all duration-1000 ${trafficStatus === 'FLUIDO' ? 'bg-emerald-500 w-full' : trafficStatus === 'MODERADO' ? 'bg-yellow-500 w-1/2' : 'bg-red-500 w-1/4'}`}></div>
                  </div>
               </div>
             </div>
          </header>
 
-         {/* PAINEL DE NAVEGAÇÃO E APPS */}
-         <div className="flex-1 overflow-y-auto no-scrollbar pb-10 space-y-10">
+         <div className="flex-1 overflow-y-auto no-scrollbar pb-12 space-y-12">
             <NavigationPanel 
               travel={travel} 
               onAddStop={() => setIsAddStopModalOpen(true)}
@@ -288,47 +333,47 @@ const App: React.FC = () => {
               transparent
             />
             
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-4 gap-6">
                {APP_DATABASE.map(app => (
-                 <button key={app.id} onClick={() => window.open(app.scheme, '_blank')} className="bg-white/5 p-6 rounded-[35px] flex flex-col items-center gap-3 border border-white/5 active:scale-90 transition-all hover:bg-white/10 hover:border-white/20">
-                    <i className={`${app.icon} ${app.color} text-2xl`}></i>
-                    <span className="text-[9px] font-black">{app.name}</span>
+                 <button key={app.id} onClick={() => window.open(app.id === 'whatsapp' ? app.scheme : app.scheme, '_blank')} className="bg-white/5 p-8 rounded-[40px] flex flex-col items-center gap-4 border border-white/5 active:scale-90 transition-all hover:bg-white/10 hover:border-cyan-500/30 shadow-xl">
+                    <i className={`${app.icon} ${app.color} text-4xl`}></i>
+                    <span className="text-[10px] font-black tracking-widest">{app.name}</span>
                  </button>
                ))}
             </div>
          </div>
 
-         <footer className="h-28 pt-8 border-t border-white/10 flex items-center">
+         <footer className="h-32 pt-10 border-t border-white/10 flex items-center">
             <MiniPlayer app={APP_DATABASE[0]} metadata={audioTrack} onControl={() => {}} onExpand={() => {}} transparent />
          </footer>
       </aside>
 
-      {/* MAPA EM TEMPO REAL */}
       <main className="flex-1 relative bg-zinc-950">
          <MapView 
             travel={travel} 
             currentPosition={currentPos} 
             heading={currentHeading} 
-            isFullScreen={mapFullScreen} 
-            mode={mapMode}
+            isFullScreen={false} 
+            mode={'3D'}
             layer={'DARK'}
-            onToggleFullScreen={() => setMapFullScreen(!mapFullScreen)} 
+            onToggleFullScreen={() => {}} 
             onRouteUpdate={(steps, dur, dist) => setTravel(p => ({...p, drivingTimeMinutes: dur, totalDistanceKm: dist}))} 
          />
          
-         {mapFullScreen && (
-            <div className="fixed bottom-12 left-12 z-[5000] bg-black/80 backdrop-blur-3xl p-14 rounded-[60px] border-2 border-cyan-500/20 flex flex-col items-center shadow-2xl scale-110">
-               <span className="text-9xl font-black leading-none tracking-tighter text-white">{currentSpeed}</span>
-               <span className="text-lg text-cyan-400 font-black mt-2 tracking-widest uppercase">KM/H</span>
-            </div>
-         )}
+         <div className="absolute bottom-14 left-14 z-[5000] bg-black/80 backdrop-blur-3xl p-16 rounded-[70px] border-2 border-cyan-500/30 flex flex-col items-center shadow-3xl scale-125">
+            <span className="text-[11rem] font-black leading-none tracking-tighter text-white">{currentSpeed}</span>
+            <span className="text-xl text-cyan-400 font-black mt-2 tracking-[0.8em]">KM/H REAL</span>
+         </div>
       </main>
 
       <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(n, la, ln) => {
           setTravel(p => ({ ...p, destination: n.toUpperCase(), destinationCoords: [la, ln], stops: [] }));
           setIsAddStopModalOpen(false);
       }} />
-      <SettingsMenu isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={{userName: 'Elivam', voiceVolume: 90, privacyMode: false, safetyDistance: 30, alertVoiceEnabled: true, preferredMusicApp: 'spotify', preferredVideoApp: 'stremio', credentials: []}} onUpdate={() => {}} mediaApps={APP_DATABASE} />
+      <style>{`
+         @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+         .animate-shimmer { animation: shimmer 3s infinite linear; }
+      `}</style>
     </div>
   );
 };
