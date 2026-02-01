@@ -18,73 +18,78 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ isOpen, onClose, settings, 
       <div className="fixed inset-0 bg-black/95 backdrop-blur-xl cursor-pointer" onClick={onClose} />
       
       <div className="relative w-full max-w-2xl bg-[#0c0c0e] rounded-[40px] border border-white/10 flex flex-col shadow-2xl overflow-hidden animate-scale-up max-h-[90dvh]" onClick={(e) => e.stopPropagation()}>
-        <div className="p-8 border-b border-white/5 flex justify-between items-center bg-gradient-to-r from-blue-900/10 to-transparent shrink-0">
-          <h2 className="text-2xl font-black tracking-tighter text-white">Privacidade & Sistema</h2>
-          <button onClick={onClose} className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl text-white border border-white/5">
+        <div className="p-8 border-b border-white/5 flex justify-between items-center bg-gradient-to-r from-red-900/10 to-transparent shrink-0">
+          <h2 className="text-2xl font-black tracking-tighter text-white">Segurança & Privacidade</h2>
+          <button onClick={onClose} className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl text-white">
             <i className="fas fa-times"></i>
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-8 space-y-8 no-scrollbar">
-          {/* MODO PRIVACIDADE */}
-          <div className="flex flex-col gap-4">
-             <div className="flex justify-between items-center">
-                <label className="text-[10px] font-black text-blue-400 tracking-widest uppercase">Modo Privacidade (Ghost)</label>
-                <button 
-                  onClick={() => onUpdate({...settings, privacyMode: !settings.privacyMode})}
-                  className={`w-14 h-8 rounded-full relative transition-all ${settings.privacyMode ? 'bg-blue-600' : 'bg-white/10'}`}
-                >
-                   <div className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${settings.privacyMode ? 'left-7' : 'left-1'}`}></div>
-                </button>
+        <div className="flex-1 overflow-y-auto p-8 space-y-10 no-scrollbar pb-12">
+          
+          {/* SEGURANÇA PROATIVA */}
+          <section className="space-y-6">
+             <label className="text-[11px] font-black text-red-500 tracking-[0.3em] uppercase block">Radar de Colisão Ativa</label>
+             <div className="bg-white/5 p-6 rounded-3xl space-y-6">
+                <div className="flex justify-between items-center">
+                   <span className="text-sm font-bold">Distância Crítica</span>
+                   <span className="text-xl font-black text-white">{settings.safetyDistance} METROS</span>
+                </div>
+                <input 
+                  type="range" min="5" max="50" step="5"
+                  value={settings.safetyDistance}
+                  onChange={(e) => onUpdate({...settings, safetyDistance: parseInt(e.target.value)})}
+                  className="w-full accent-red-600 h-2 bg-white/10 rounded-full appearance-none cursor-pointer"
+                />
+                <div className="flex items-center gap-3">
+                   <input 
+                     type="checkbox" 
+                     checked={settings.alertVoiceEnabled}
+                     onChange={(e) => onUpdate({...settings, alertVoiceEnabled: e.target.checked})}
+                     className="w-6 h-6 rounded bg-black border-white/10"
+                   />
+                   <span className="text-[10px] font-black opacity-60">Alertas de voz em tempo real</span>
+                </div>
              </div>
-             <p className="text-[9px] text-white/30 lowercase">Quando ativo, a EVA não mostrará nomes ou lerá mensagens em voz alta sem autorização.</p>
-          </div>
+          </section>
 
-          {/* LIMITE DE MENSAGENS */}
-          <div className="flex flex-col gap-4">
-             <label className="text-[10px] font-black text-blue-400 tracking-widest uppercase">Leitura de Mensagens</label>
+          {/* PRIVACIDADE GHOST */}
+          <section className="space-y-6">
+             <label className="text-[11px] font-black text-blue-500 tracking-[0.3em] uppercase block">Modo Ghost (Privacidade)</label>
+             <div className="bg-white/5 p-6 rounded-3xl space-y-6">
+                <div className="flex justify-between items-center">
+                   <span className="text-sm font-bold">Ocultar Remetente & Conteúdo</span>
+                   <button 
+                      onClick={() => onUpdate({...settings, privacyMode: !settings.privacyMode})}
+                      className={`w-14 h-8 rounded-full relative transition-all ${settings.privacyMode ? 'bg-blue-600' : 'bg-white/10'}`}
+                   >
+                      <div className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${settings.privacyMode ? 'left-7' : 'left-1'}`}></div>
+                   </button>
+                </div>
+                <p className="text-[9px] text-white/30 lowercase italic">A EVA não ditará ou mostrará mensagens recebidas sem comando de voz específico.</p>
+             </div>
+          </section>
+
+          {/* LEITURA DE WHATSAPP */}
+          <section className="space-y-6">
+             <label className="text-[11px] font-black text-emerald-500 tracking-[0.3em] uppercase block">Leitura de WhatsApp</label>
              <div className="grid grid-cols-2 gap-4">
                 <button 
                   onClick={() => onUpdate({...settings, messageLimit: 128})}
-                  className={`h-14 rounded-2xl border font-black text-[10px] transition-all ${settings.messageLimit === 128 ? 'bg-blue-600 border-blue-400' : 'bg-white/5 border-white/5 text-white/40'}`}
-                >RESUMO (128 CHARS)</button>
+                  className={`h-16 rounded-2xl border font-black text-[11px] transition-all ${settings.messageLimit === 128 ? 'bg-emerald-600 border-emerald-400' : 'bg-white/5 border-white/5 text-white/40'}`}
+                >MODO RESUMO (128C)</button>
                 <button 
                   onClick={() => onUpdate({...settings, messageLimit: 'full'})}
-                  className={`h-14 rounded-2xl border font-black text-[10px] transition-all ${settings.messageLimit === 'full' ? 'bg-blue-600 border-blue-400' : 'bg-white/5 border-white/5 text-white/40'}`}
+                  className={`h-16 rounded-2xl border font-black text-[11px] transition-all ${settings.messageLimit === 'full' ? 'bg-emerald-600 border-emerald-400' : 'bg-white/5 border-white/5 text-white/40'}`}
                 >TEXTO COMPLETO</button>
              </div>
-          </div>
-
-          <div className="flex flex-col gap-4">
-             <label className="text-[10px] font-black text-blue-400 tracking-widest uppercase">ID do Condutor</label>
-             <input 
-               type="text"
-               value={settings.userName}
-               onChange={(e) => onUpdate({...settings, userName: e.target.value})}
-               className="w-full h-14 bg-black/60 border border-white/10 rounded-2xl px-6 text-lg font-black outline-none focus:border-blue-500 text-white uppercase italic"
-             />
-          </div>
-
-          <div className="flex flex-col gap-6">
-             <label className="text-[10px] font-black text-blue-400 tracking-widest uppercase">Volume do Sistema</label>
-             <input 
-               type="range" min="0" max="100" 
-               value={settings.voiceVolume}
-               onChange={(e) => onUpdate({...settings, voiceVolume: parseInt(e.target.value)})}
-               className="w-full accent-blue-600 h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer"
-             />
-          </div>
+          </section>
         </div>
 
         <div className="p-8 border-t border-white/5 bg-black/40">
-           <button onClick={onClose} className="w-full h-16 bg-blue-600 rounded-2xl text-white font-black text-lg shadow-xl active:scale-95 transition-all uppercase italic">Confirmar Mudanças</button>
+           <button onClick={onClose} className="w-full h-20 bg-blue-600 rounded-3xl text-white font-black text-lg shadow-xl active:scale-95 transition-all uppercase italic">Salvar Protocolos</button>
         </div>
       </div>
-
-      <style>{`
-        @keyframes scale-up { 0% { transform: scale(0.95); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-        .animate-scale-up { animation: scale-up 0.2s ease-out; }
-      `}</style>
     </div>
   );
 };

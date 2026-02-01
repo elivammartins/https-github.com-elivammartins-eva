@@ -7,16 +7,17 @@ declare const L: any;
 interface MapViewProps {
   travel: TravelInfo;
   currentPosition: [number, number];
-  viewMode: '2D' | '3D';
-  onSetDestination: () => void;
+  isFullScreen: boolean;
+  onToggleFullScreen: () => void;
   onRouteUpdate?: (steps: RouteStep[], duration: number, distance: number) => void;
 }
 
-const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdate }) => {
+const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, isFullScreen, onToggleFullScreen, onRouteUpdate }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const routeLayerRef = useRef<any>(null);
   const vehicleMarkerRef = useRef<any>(null);
+  const markersRef = useRef<any[]>([]);
 
   useEffect(() => {
     if (typeof L === 'undefined' || !mapContainerRef.current) return;
@@ -26,30 +27,25 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
         zoomControl: false, 
         attributionControl: false, 
         center: currentPosition, 
-        zoom: 17,
-        fadeAnimation: true
+        zoom: 17
       });
 
-      // Estilo Waze: Usando tile-set mais colorido e claro
       L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(mapRef.current);
       
-      const icon = L.divIcon({
-        className: 'vehicle-waze',
+      const vehicleIcon = L.divIcon({
+        className: 'vehicle-marker',
         html: `
-          <div style="position: relative;">
-            <div style="width: 60px; height: 60px; background: #33CCFF; border: 5px solid white; border-radius: 50%; box-shadow: 0 10px 30px rgba(51,204,255,0.6); display: flex; align-items: center; justify-content: center;">
-              <i class="fas fa-location-arrow" style="color: white; font-size: 26px; transform: rotate(-45deg);"></i>
-            </div>
-            <div style="position: absolute; top: -15px; left: 50%; transform: translateX(-50%); background: white; padding: 2px 8px; border-radius: 10px; font-weight: 900; font-size: 10px; color: #33CCFF; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">VOCÊ</div>
+          <div style="width: 50px; height: 50px; background: #33CCFF; border: 4px solid white; border-radius: 50%; box-shadow: 0 0 30px rgba(51,204,255,0.8); display: flex; align-items: center; justify-content: center; transform: rotate(45deg);">
+            <i class="fas fa-location-arrow" style="color: white; font-size: 20px; transform: rotate(-45deg);"></i>
           </div>
         `,
-        iconSize: [60, 60], iconAnchor: [30, 30]
+        iconSize: [50, 50], iconAnchor: [25, 25]
       });
 
-      vehicleMarkerRef.current = L.marker(currentPosition, { icon }).addTo(mapRef.current);
+      vehicleMarkerRef.current = L.marker(currentPosition, { icon: vehicleIcon }).addTo(mapRef.current);
     }
 
-    const timer = setInterval(() => { if (mapRef.current) mapRef.current.invalidateSize(); }, 1500);
+    const timer = setInterval(() => { if (mapRef.current) mapRef.current.invalidateSize(); }, 500);
     return () => { 
       clearInterval(timer);
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } 
@@ -58,13 +54,27 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
 
   useEffect(() => {
     if (vehicleMarkerRef.current) vehicleMarkerRef.current.setLatLng(currentPosition);
-    if (mapRef.current && !travel.destinationCoords) mapRef.current.panTo(currentPosition, { animate: true });
-  }, [currentPosition, travel.destinationCoords]);
+    if (mapRef.current && !isFullScreen) {
+       mapRef.current.panTo(currentPosition, { animate: true });
+    }
+  }, [currentPosition, isFullScreen]);
 
   useEffect(() => {
-    const fetchRoute = async () => {
+    const fetchMultiRoute = async () => {
       if (!mapRef.current || !travel.destinationCoords) return;
-      const url = `https://router.project-osrm.org/route/v1/driving/${currentPosition[1]},${currentPosition[0]};${travel.destinationCoords[1]},${travel.destinationCoords[0]}?overview=full&geometries=geojson&steps=true&languages=pt-BR`;
+
+      // Limpar marcadores antigos
+      markersRef.current.forEach(m => mapRef.current.removeLayer(m));
+      markersRef.current = [];
+
+      // Montar coordenadas da rota: [atual] -> [paradas] -> [destino]
+      const coords = [
+        `${currentPosition[1]},${currentPosition[0]}`,
+        ...travel.stops.map(s => `${s.coords[1]},${s.coords[0]}`),
+        `${travel.destinationCoords[1]},${travel.destinationCoords[0]}`
+      ].join(';');
+
+      const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true&languages=pt-BR`;
       
       try {
         const res = await fetch(url);
@@ -73,37 +83,65 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, onRouteUpdat
           const route = data.routes[0];
           if (routeLayerRef.current) mapRef.current.removeLayer(routeLayerRef.current);
 
-          // Rota estilo Waze: Azul brilhante e grossa
           routeLayerRef.current = L.geoJSON(route.geometry, { 
-            style: { color: '#33CCFF', weight: 14, opacity: 0.9, lineCap: 'round', lineJoin: 'round' } 
+            style: { color: '#33CCFF', weight: 12, opacity: 0.8, lineCap: 'round' } 
           }).addTo(mapRef.current);
           
-          mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [150, 150], animate: true });
+          if (!isFullScreen) mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [100, 100] });
 
-          const steps: RouteStep[] = route.legs[0].steps.map((s: any) => ({
-            instruction: s.maneuver.instruction,
-            street: s.name || 'Via Local',
-            distance: Math.round(s.distance),
-            maneuver: s.maneuver.modifier || 'straight'
-          }));
+          // Adicionar marcadores de parada e radares
+          travel.stops.forEach(s => {
+             const m = L.marker(s.coords, {
+                icon: L.divIcon({ className: 'stop-m', html: `<i class="fas fa-circle-dot text-blue-600 text-xl shadow-lg"></i>`, iconSize: [20, 20] })
+             }).addTo(mapRef.current);
+             markersRef.current.push(m);
+          });
 
-          if (onRouteUpdate) onRouteUpdate(steps, route.duration, route.distance);
+          travel.warnings.filter(w => w.type === 'RADAR').forEach(w => {
+            const m = L.marker(w.coords, {
+               icon: L.divIcon({ className: 'radar-m', html: `<i class="fas fa-camera text-red-500 text-xl animate-pulse"></i>`, iconSize: [24, 24] })
+            }).addTo(mapRef.current);
+            markersRef.current.push(m);
+          });
+
+          if (onRouteUpdate) onRouteUpdate([], Math.round(route.duration / 60), Math.round(route.distance / 1000));
         }
-      } catch (e) { console.error("OSRM Erro:", e); }
+      } catch (e) { console.error("OSRM Multi Error:", e); }
     };
-    fetchRoute();
-  }, [travel.destinationCoords]);
+    fetchMultiRoute();
+  }, [travel.destinationCoords, travel.stops, travel.warnings]);
 
   return (
-    <div className="w-full h-full relative">
-       <div ref={mapContainerRef} className="w-full h-full grayscale-[0.2] saturate-[1.4]" />
-       {/* Placas Waze Fake UI */}
-       <div className="absolute top-10 right-10 flex flex-col gap-4 pointer-events-none">
-          <div className="bg-white p-3 rounded-2xl shadow-xl flex items-center gap-3 border-b-4 border-emerald-500 animate-bounce">
-             <i className="fas fa-camera text-blue-500 text-xl"></i>
-             <span className="text-xs font-black text-slate-800 uppercase">Radar Próximo</span>
+    <div className={`w-full h-full relative cursor-pointer group`} onClick={onToggleFullScreen}>
+       <div ref={mapContainerRef} className="w-full h-full" />
+       
+       <div className="absolute top-10 left-10 pointer-events-none z-50">
+          <div className="flex flex-col gap-4">
+             <div className="px-6 py-3 bg-white text-slate-900 rounded-2xl shadow-2xl flex items-center gap-4 border-b-4 border-blue-600">
+                <i className="fas fa-compass text-2xl animate-spin-slow"></i>
+                <span className="text-xs font-black uppercase tracking-widest">{isFullScreen ? 'FULL NAVIGATION' : 'COCKPIT VIEW'}</span>
+             </div>
+             {isFullScreen && (
+               <div className="bg-black/80 backdrop-blur-xl p-4 rounded-2xl border border-white/10 text-white animate-fade-in">
+                  <p className="text-[10px] font-black uppercase text-blue-400 mb-1">Status Pandora</p>
+                  <p className="text-xs font-bold uppercase">Toque para voltar ao painel</p>
+               </div>
+             )}
           </div>
        </div>
+
+       <div className="absolute bottom-10 left-10 flex gap-4 pointer-events-none">
+          {travel.warnings.slice(0, 2).map(w => (
+            <div key={w.id} className="bg-red-600 text-white px-5 py-3 rounded-2xl font-black text-[10px] flex items-center gap-3 animate-bounce shadow-2xl">
+               <i className="fas fa-triangle-exclamation"></i>
+               {w.description.toUpperCase()} - {w.distance}M
+            </div>
+          ))}
+       </div>
+       <style>{`
+          .animate-spin-slow { animation: spin 8s linear infinite; }
+          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+       `}</style>
     </div>
   );
 };

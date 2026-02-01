@@ -7,14 +7,10 @@ export interface LocationData {
 }
 
 export type MediaViewState = 'FULL' | 'PIP' | 'HIDDEN';
-export type WarningType = 'RADAR' | 'ACCIDENT' | 'HAZARD' | 'POLICE' | 'TRAFFIC';
+export type WarningType = 'RADAR' | 'ACCIDENT' | 'HAZARD' | 'POLICE' | 'TRAFFIC' | 'COLLISION' | 'FLOOD';
 
-export interface RouteStep {
-  instruction: string;
-  street: string;
-  distance: number;
-  maneuver: string;
-}
+// Fix: Defined missing CarAction type required by BluelinkPanel.tsx
+export type CarAction = 'LOCK' | 'UNLOCK' | 'START' | 'STOP' | 'WINDOWS_UP' | 'WINDOWS_DOWN' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
 
 export interface RouteWarning {
   id: string;
@@ -22,60 +18,52 @@ export interface RouteWarning {
   distance: number;
   description: string;
   coords: [number, number];
+  speedLimit?: number; // Para radares
+}
+
+// Fix: Defined missing RouteStep type required by MapView.tsx
+export interface RouteStep {
+  instruction: string;
+  distance: number;
 }
 
 export interface StopInfo {
+  id: string;
   name: string;
-  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE';
+  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'DESTINATION';
   coords: [number, number];
+  distanceFromPrev?: string;
+  timeFromPrev?: string;
 }
 
+// Fix: Defined missing StopRecommendation type required by RecommendationCard.tsx
 export interface StopRecommendation {
   name: string;
   type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE';
   distance: string;
   rating: number;
-  coords: [number, number];
 }
 
 export interface TravelInfo {
   destination: string;
   destinationCoords?: [number, number];
   stops: StopInfo[];
-  nextInstruction?: RouteStep;
-  allSteps?: RouteStep[];
   warnings: RouteWarning[];
   drivingTimeMinutes?: number;
   totalDistanceKm?: number;
-  currentLimit?: number;
-}
-
-export interface Contact {
-  name: string;
-  phone: string;
-}
-
-export interface IncomingMessage {
-  id: string;
-  sender: string;
-  content: string;
-  timestamp: number;
-  type: 'WHATSAPP' | 'SMS';
+  weatherStatus?: string;
+  floodRisk?: 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
 export interface AppSettings {
   userName: string;
   voiceVolume: number;
   privacyMode: boolean;
+  hideSenderInfo: boolean;
   messageLimit: 128 | 'full';
-  playerProfiles: { appName: string; profileName: string }[];
+  safetyDistance: number; 
+  alertVoiceEnabled: boolean;
 }
-
-export type CarAction = 
-  | 'START' | 'STOP' 
-  | 'LOCK' | 'UNLOCK' 
-  | 'WINDOWS_UP' | 'WINDOWS_DOWN' 
-  | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
 
 export interface CarStatus {
   lastAction: string;
@@ -86,25 +74,26 @@ export interface CarStatus {
   hazardActive: boolean;
 }
 
-// Added MediaApp interface for dashboard and entertainment apps
 export interface MediaApp {
   id: string;
   name: string;
   icon: string;
   color: string;
-  category: 'AUDIO' | 'VIDEO';
+  category: 'AUDIO' | 'VIDEO' | 'COMM';
   scheme: string;
 }
 
-// Added TrackMetadata for media playback information
 export interface TrackMetadata {
   title: string;
   artist: string;
   isPlaying: boolean;
   progress: number;
+  seriesName?: string;
+  season?: number;
+  episode?: number;
 }
 
-// Added MeetingInfo for calendar and meeting views
+// Fix: Defined missing MeetingInfo type required by MeetingView.tsx
 export interface MeetingInfo {
   title: string;
   startTime: string;
