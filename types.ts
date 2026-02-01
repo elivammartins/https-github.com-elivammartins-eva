@@ -9,7 +9,6 @@ export interface LocationData {
 export type MediaViewState = 'FULL' | 'PIP' | 'HIDDEN';
 export type WarningType = 'RADAR' | 'ACCIDENT' | 'HAZARD' | 'POLICE' | 'TRAFFIC' | 'COLLISION' | 'FLOOD';
 
-// Fix: Defined missing CarAction type required by BluelinkPanel.tsx
 export type CarAction = 'LOCK' | 'UNLOCK' | 'START' | 'STOP' | 'WINDOWS_UP' | 'WINDOWS_DOWN' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
 
 export interface RouteWarning {
@@ -18,13 +17,17 @@ export interface RouteWarning {
   distance: number;
   description: string;
   coords: [number, number];
-  speedLimit?: number; // Para radares
+  speedLimit?: number; 
 }
 
-// Fix: Defined missing RouteStep type required by MapView.tsx
 export interface RouteStep {
   instruction: string;
   distance: number;
+}
+
+export interface RouteSegment {
+  distance: string;
+  duration: string;
 }
 
 export interface StopInfo {
@@ -36,7 +39,6 @@ export interface StopInfo {
   timeFromPrev?: string;
 }
 
-// Fix: Defined missing StopRecommendation type required by RecommendationCard.tsx
 export interface StopRecommendation {
   name: string;
   type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE';
@@ -93,7 +95,6 @@ export interface TrackMetadata {
   episode?: number;
 }
 
-// Fix: Defined missing MeetingInfo type required by MeetingView.tsx
 export interface MeetingInfo {
   title: string;
   startTime: string;

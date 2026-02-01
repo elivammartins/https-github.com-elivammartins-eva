@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef } from 'react';
-import { TravelInfo, RouteStep } from '../types';
+import { TravelInfo, RouteStep, RouteSegment } from '../types';
 
 declare const L: any;
 
@@ -9,7 +9,7 @@ interface MapViewProps {
   currentPosition: [number, number];
   isFullScreen: boolean;
   onToggleFullScreen: () => void;
-  onRouteUpdate?: (steps: RouteStep[], duration: number, distance: number) => void;
+  onRouteUpdate?: (steps: RouteStep[], duration: number, distance: number, segments: RouteSegment[]) => void;
 }
 
 const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, isFullScreen, onToggleFullScreen, onRouteUpdate }) => {
@@ -63,11 +63,9 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, isFullScreen
     const fetchMultiRoute = async () => {
       if (!mapRef.current || !travel.destinationCoords) return;
 
-      // Limpar marcadores antigos
       markersRef.current.forEach(m => mapRef.current.removeLayer(m));
       markersRef.current = [];
 
-      // Montar coordenadas da rota: [atual] -> [paradas] -> [destino]
       const coords = [
         `${currentPosition[1]},${currentPosition[0]}`,
         ...travel.stops.map(s => `${s.coords[1]},${s.coords[0]}`),
@@ -89,22 +87,34 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, isFullScreen
           
           if (!isFullScreen) mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [100, 100] });
 
-          // Adicionar marcadores de parada e radares
-          travel.stops.forEach(s => {
+          travel.stops.forEach((s, idx) => {
              const m = L.marker(s.coords, {
-                icon: L.divIcon({ className: 'stop-m', html: `<i class="fas fa-circle-dot text-blue-600 text-xl shadow-lg"></i>`, iconSize: [20, 20] })
+                icon: L.divIcon({ className: 'stop-m', html: `<i class="fas fa-location-pin text-blue-600 text-3xl shadow-lg"></i>`, iconSize: [30, 30] })
              }).addTo(mapRef.current);
              markersRef.current.push(m);
           });
 
-          travel.warnings.filter(w => w.type === 'RADAR').forEach(w => {
-            const m = L.marker(w.coords, {
-               icon: L.divIcon({ className: 'radar-m', html: `<i class="fas fa-camera text-red-500 text-xl animate-pulse"></i>`, iconSize: [24, 24] })
-            }).addTo(mapRef.current);
-            markersRef.current.push(m);
+          travel.warnings.forEach(w => {
+            let iconHtml = '';
+            if (w.type === 'RADAR') iconHtml = `<i class="fas fa-camera text-blue-500 text-2xl animate-pulse"></i>`;
+            else if (w.type === 'POLICE') iconHtml = `<i class="fas fa-user-shield text-orange-500 text-2xl animate-bounce"></i>`;
+            else if (w.type === 'FLOOD') iconHtml = `<i class="fas fa-water text-cyan-400 text-2xl"></i>`;
+            
+            if (iconHtml) {
+              const m = L.marker(w.coords, {
+                 icon: L.divIcon({ className: 'warning-m', html: iconHtml, iconSize: [30, 30] })
+              }).addTo(mapRef.current);
+              markersRef.current.push(m);
+            }
           });
 
-          if (onRouteUpdate) onRouteUpdate([], Math.round(route.duration / 60), Math.round(route.distance / 1000));
+          if (onRouteUpdate) {
+            const segments: RouteSegment[] = route.legs.map((l: any) => ({
+              distance: (l.distance / 1000).toFixed(1) + 'km',
+              duration: Math.round(l.duration / 60) + 'm'
+            }));
+            onRouteUpdate([], Math.round(route.duration / 60), Math.round(route.distance / 1000), segments);
+          }
         }
       } catch (e) { console.error("OSRM Multi Error:", e); }
     };
@@ -119,22 +129,21 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, isFullScreen
           <div className="flex flex-col gap-4">
              <div className="px-6 py-3 bg-white text-slate-900 rounded-2xl shadow-2xl flex items-center gap-4 border-b-4 border-blue-600">
                 <i className="fas fa-compass text-2xl animate-spin-slow"></i>
-                <span className="text-xs font-black uppercase tracking-widest">{isFullScreen ? 'FULL NAVIGATION' : 'COCKPIT VIEW'}</span>
+                <span className="text-xs font-black uppercase tracking-widest">{isFullScreen ? 'NAVEGAÇÃO TOTAL' : 'VISÃO COCKPIT'}</span>
              </div>
-             {isFullScreen && (
-               <div className="bg-black/80 backdrop-blur-xl p-4 rounded-2xl border border-white/10 text-white animate-fade-in">
-                  <p className="text-[10px] font-black uppercase text-blue-400 mb-1">Status Pandora</p>
-                  <p className="text-xs font-bold uppercase">Toque para voltar ao painel</p>
-               </div>
-             )}
           </div>
        </div>
 
-       <div className="absolute bottom-10 left-10 flex gap-4 pointer-events-none">
-          {travel.warnings.slice(0, 2).map(w => (
-            <div key={w.id} className="bg-red-600 text-white px-5 py-3 rounded-2xl font-black text-[10px] flex items-center gap-3 animate-bounce shadow-2xl">
-               <i className="fas fa-triangle-exclamation"></i>
-               {w.description.toUpperCase()} - {w.distance}M
+       <div className="absolute bottom-10 left-10 flex flex-col gap-4 pointer-events-none">
+          {travel.warnings.slice(0, 3).map(w => (
+            <div key={w.id} className="bg-black/80 backdrop-blur-xl text-white px-5 py-3 rounded-2xl font-black text-[11px] flex items-center gap-4 border border-white/10 shadow-2xl animate-fade-in">
+               <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
+                  <i className={`fas ${w.type === 'RADAR' ? 'fa-camera text-blue-400' : w.type === 'POLICE' ? 'fa-user-shield text-orange-400' : 'fa-triangle-exclamation text-red-400'}`}></i>
+               </div>
+               <div className="flex flex-col">
+                  <span className="leading-none">{w.description.toUpperCase()}</span>
+                  <span className="text-[9px] text-white/40 mt-1">{w.distance}M • {w.speedLimit ? `${w.speedLimit} KM/H` : 'ALERTA'}</span>
+               </div>
             </div>
           ))}
        </div>
