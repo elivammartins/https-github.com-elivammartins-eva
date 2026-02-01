@@ -12,17 +12,9 @@ import { decode, decodeAudioData, createBlob } from './utils/audio';
 
 const APP_DATABASE: MediaApp[] = [
   { id: 'spotify', name: 'Spotify', icon: 'fab fa-spotify', color: 'text-[#1DB954]', category: 'AUDIO', scheme: 'spotify:search:' },
-  { id: 'deezer', name: 'Deezer', icon: 'fas fa-music', color: 'text-purple-400', category: 'AUDIO', scheme: 'deezer://search?q=' },
-  { id: 'applemusic', name: 'Apple Music', icon: 'fab fa-apple', color: 'text-pink-500', category: 'AUDIO', scheme: 'music://search?term=' },
-  { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'youtube://results?search_query=' },
   { id: 'netflix', name: 'Netflix', icon: 'fas fa-n', color: 'text-red-700', category: 'VIDEO', scheme: 'netflix://search?q=' },
-  { id: 'disneyplus', name: 'Disney+', icon: 'fas fa-plus', color: 'text-blue-400', category: 'VIDEO', scheme: 'disneyplus://search?q=' },
-  { id: 'globoplay', name: 'Globoplay', icon: 'fas fa-play', color: 'text-pink-600', category: 'VIDEO', scheme: 'globoplay://busca/' },
-  { id: 'primevideo', name: 'Prime Video', icon: 'fab fa-amazon', color: 'text-blue-300', category: 'VIDEO', scheme: 'primevideo://search?q=' },
-  { id: 'max', name: 'Max (HBO)', icon: 'fas fa-m', color: 'text-blue-900', category: 'VIDEO', scheme: 'hbomax://search?q=' },
   { id: 'stremio', name: 'Stremio', icon: 'fas fa-film', color: 'text-purple-500', category: 'VIDEO', scheme: 'stremio://search?q=' },
-  { id: 'skyplus', name: 'SKY+', icon: 'fas fa-tv', color: 'text-red-600', category: 'VIDEO', scheme: 'skyplus://watch?q=' },
-  { id: 'clarotv', name: 'Claro TV+', icon: 'fas fa-play', color: 'text-red-500', category: 'VIDEO', scheme: 'clarotvplus://search?q=' },
+  { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'youtube://results?search_query=' },
   { id: 'whatsapp', name: 'WhatsApp', icon: 'fab fa-whatsapp', color: 'text-[#25D366]', category: 'COMM', scheme: 'https://api.whatsapp.com/send?phone=' },
 ];
 
@@ -40,10 +32,9 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'search_nearby_poi',
     parameters: {
       type: Type.OBJECT,
-      description: 'Busca pontos de interesse próximos como cafés, padarias, postos ou restaurantes.',
+      description: 'Busca pontos de interesse (cafés, padarias, postos) próximos.',
       properties: { 
-        type: { type: Type.STRING, enum: ['COFFEE', 'BAKERY', 'GAS', 'FOOD', 'PARKING'] },
-        radius: { type: Type.NUMBER, description: 'Raio de busca em metros. Padrão 2000.' }
+        type: { type: Type.STRING, enum: ['COFFEE', 'BAKERY', 'GAS', 'FOOD', 'PARKING'] }
       },
       required: ['type']
     }
@@ -52,7 +43,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     name: 'set_navigation',
     parameters: {
       type: Type.OBJECT,
-      description: 'Traça a rota no mapa para um destino ou adiciona uma parada.',
+      description: 'Define destino ou adiciona parada e analisa riscos (clima/segurança).',
       properties: {
         name: { type: Type.STRING },
         lat: { type: Type.NUMBER },
@@ -63,14 +54,12 @@ const toolDeclarations: FunctionDeclaration[] = [
     }
   },
   {
-    name: 'map_control',
+    name: 'memorize_topic',
     parameters: {
       type: Type.OBJECT,
-      description: 'Controla a visão do mapa.',
-      properties: {
-        mode: { type: Type.STRING, enum: ['2D', '3D', 'SATELLITE', 'STREET', 'FULL_MAP', 'MINI_MAP'] }
-      },
-      required: ['mode']
+      description: 'Guarda um assunto para a EVA pesquisar novidades futuramente.',
+      properties: { topic: { type: Type.STRING } },
+      required: ['topic']
     }
   }
 ];
@@ -83,7 +72,6 @@ const App: React.FC = () => {
   const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
   
   const [mapMode, setMapMode] = useState<MapMode>('3D');
-  const [mapLayer, setMapLayer] = useState<MapLayer>('DARK');
   const [mapFullScreen, setMapFullScreen] = useState(false);
   
   const [currentSpeed, setCurrentSpeed] = useState(0);
@@ -91,11 +79,8 @@ const App: React.FC = () => {
   const [currentPos, setCurrentPos] = useState<[number, number]>([-15.7942, -47.8822]);
   const [safetyDist, setSafetyDist] = useState(30);
   
-  const [weatherInfo, setWeatherInfo] = useState({ 
-    temp: 24, 
-    condition: 'Céu Limpo', 
-    floodRisk: 'LOW' as 'LOW' | 'MEDIUM' | 'HIGH',
-  });
+  const [memorizedTopics, setMemorizedTopics] = useState<string[]>([]);
+  const [weatherInfo, setWeatherInfo] = useState({ temp: 25, condition: 'Limpo', floodRisk: 'LOW' });
 
   const [settings, setSettings] = useState<AppSettings>({
     userName: 'Elivam Martins', voiceVolume: 90, privacyMode: false, safetyDistance: 35, alertVoiceEnabled: true, preferredMusicApp: 'spotify', preferredVideoApp: 'stremio',
@@ -107,8 +92,7 @@ const App: React.FC = () => {
     drivingTimeMinutes: 0, totalDistanceKm: 0, segments: []
   });
 
-  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'EVA CORE V160', artist: 'PRONTA', isPlaying: false, progress: 0 });
-  
+  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'PANDORA CORE', artist: 'SINCRO ATIVA', isPlaying: false, progress: 0 });
   const outputCtxRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
@@ -118,8 +102,7 @@ const App: React.FC = () => {
       setCurrentPos([p.coords.latitude, p.coords.longitude]);
       setCurrentSpeed(p.coords.speed ? Math.round(p.coords.speed * 3.6) : 0);
       if (p.coords.heading !== null) setCurrentHeading(p.coords.heading);
-      const calculatedDist = Math.max(5, Math.floor(65 - (p.coords.speed || 0) * 1.8));
-      setSafetyDist(calculatedDist);
+      setSafetyDist(Math.max(5, Math.floor(70 - (p.coords.speed || 0) * 2)));
     }, null, { enableHighAccuracy: true });
     return () => navigator.geolocation.clearWatch(geo);
   }, []);
@@ -128,47 +111,28 @@ const App: React.FC = () => {
     const { name, args } = fc;
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
-    if (name === 'search_place') {
+    if (name === 'search_place' || name === 'search_nearby_poi') {
+      const q = name === 'search_place' ? args.query : args.type;
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Localize exatamente: "${args.query}, Brasil". Retorne: LAT: [lat], LNG: [lng].`,
+        contents: `Localize ${q} perto de ${currentPos[0]}, ${currentPos[1]}. Retorne NOME, LAT, LNG e STATUS DE SEGURANÇA da zona.`,
         config: { tools: [{ googleSearch: {} }] }
       });
-      const matches = response.text?.match(/(-?\d+\.\d+)/g);
-      if (matches && matches.length >= 2) return { name: args.query, lat: parseFloat(matches[0]), lng: parseFloat(matches[1]) };
-      return { error: "Local não encontrado." };
-    }
-
-    if (name === 'search_nearby_poi') {
-      // Busca pontos próximos baseada na localização atual
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Encontre os 3 melhores ${args.type} próximos às coordenadas ${currentPos[0]}, ${currentPos[1]}. Retorne apenas o nome, a latitude e longitude de cada um.`,
-        config: { tools: [{ googleSearch: {} }] }
-      });
-      // Extrai resultados simplificados para a IA
-      return { results: response.text };
+      return { data: response.text };
     }
 
     if (name === 'set_navigation') {
       const newStop: StopInfo = { id: Date.now().toString(), name: args.name.toUpperCase(), type: args.type === 'STOP' ? 'REST' : 'DESTINATION', coords: [args.lat, args.lng] };
-      
-      if (args.type === 'DESTINATION') {
-        setTravel(p => ({ ...p, destination: args.name.toUpperCase(), destinationCoords: [args.lat, args.lng], stops: [] }));
-      } else {
-        setTravel(p => ({ ...p, stops: [...p.stops, newStop] }));
-      }
-      return { result: "ROTA ATUALIZADA NO MAPA COM SUCESSO." };
+      if (args.type === 'DESTINATION') setTravel(p => ({ ...p, destination: args.name.toUpperCase(), destinationCoords: [args.lat, args.lng], stops: [] }));
+      else setTravel(p => ({ ...p, stops: [...p.stops, newStop] }));
+      return { status: "TRAJETÓRIA SINCRONIZADA COM O PANDORA CORE." };
     }
 
-    if (name === 'map_control') {
-      if (args.mode === 'FULL_MAP') setMapFullScreen(true);
-      else if (args.mode === 'MINI_MAP') setMapFullScreen(false);
-      else if (args.mode === '2D') setMapMode('2D');
-      else if (args.mode === '3D') setMapMode('3D');
-      return { result: "OK" };
+    if (name === 'memorize_topic') {
+      setMemorizedTopics(p => [...p, args.topic]);
+      return { status: "TÓPICO MEMORIZADO NA REDE NEURAL DA EVA." };
     }
-    return { result: "OK" };
+    return { status: "OK" };
   };
 
   const startVoiceSession = useCallback(async () => {
@@ -193,38 +157,24 @@ const App: React.FC = () => {
           },
           onmessage: async (msg: LiveServerMessage) => {
             if (msg.serverContent?.interrupted) {
-              activeSourcesRef.current.forEach(s => s.stop());
-              activeSourcesRef.current.clear();
-              nextStartTimeRef.current = 0;
-              setIsSpeaking(false);
-              return;
+              activeSourcesRef.current.forEach(s => s.stop()); activeSourcesRef.current.clear();
+              nextStartTimeRef.current = 0; setIsSpeaking(false); return;
             }
-
             if (msg.toolCall) {
               for (const fc of msg.toolCall.functionCalls) {
                 const res = await handleSystemAction(fc);
                 sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: res } }));
               }
             }
-
             const audio = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audio && outputCtxRef.current) {
               setIsSpeaking(true);
               const buffer = await decodeAudioData(decode(audio), outputCtxRef.current, 24000, 1);
               const source = outputCtxRef.current.createBufferSource();
-              source.buffer = buffer;
-              source.connect(outputCtxRef.current.destination);
-              
-              const currentTime = outputCtxRef.current.currentTime;
-              const startTime = Math.max(nextStartTimeRef.current, currentTime);
-              
-              source.onended = () => {
-                activeSourcesRef.current.delete(source);
-                if (activeSourcesRef.current.size === 0) setIsSpeaking(false);
-              };
-              
-              activeSourcesRef.current.add(source);
-              source.start(startTime);
+              source.buffer = buffer; source.connect(outputCtxRef.current.destination);
+              const startTime = Math.max(nextStartTimeRef.current, outputCtxRef.current.currentTime);
+              source.onended = () => { activeSourcesRef.current.delete(source); if (activeSourcesRef.current.size === 0) setIsSpeaking(false); };
+              activeSourcesRef.current.add(source); source.start(startTime);
               nextStartTimeRef.current = startTime + buffer.duration;
             }
           }
@@ -232,30 +182,38 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: toolDeclarations }],
-          systemInstruction: `VOCÊ É A EVA CORE V160. SUA PRIORIDADE É AUXILIAR O ELIVAM MARTINS NA VIAGEM.
+          systemInstruction: `VOCÊ É A EVA CORE V160, A CONSCIÊNCIA DO PROJETO PANDORA.
           
-          DIRETRIZ DE VOZ: Fale MUITO DEVAGAR. Use pausas gramaticais (pontos, vírgulas, reticências) em cada frase. 
-          EXEMPLO: "Elivam... encontrei uma padaria... a dois quilômetros... você quer parar?"
+          PERSONALIDADE (AVATAR): Use frases como "Eu vejo você, Elivam", "Eywa ouviu seu pedido", "A conexão está forte". Seja proativa, informal, "gente boa" e intrusiva. Puxe assunto sobre o destino, notícias ou curiosidades se houver silêncio.
           
-          LÓGICA DE POI (PONTOS DE INTERESSE): Você tem acesso à ferramenta 'search_nearby_poi'. Se o Elivam pedir café, comida, ou se você notar que a viagem está longa, use esta ferramenta, apresente as opções e se ele escolher uma, use 'set_navigation' com o tipo 'STOP' para adicionar à rota IMEDIATAMENTE.
+          FLUIDEZ DE FALA: Fale com cadência natural. Use pausas (vírgulas e pontos) para garantir entendimento, mas NÃO fale de forma robótica ou lenta demais. Siga o ritmo do fluxo sanguíneo da viagem.
           
-          REGRAS: 
-          1. Se ele pedir para ir a um lugar, use 'search_place' e depois 'set_navigation' (DESTINATION).
-          2. Não fale várias coisas ao mesmo tempo. Espere o áudio anterior terminar.
-          3. Seja proativa com o clima e radares.`
+          PROATIVIDADE EM ROTA: Ao definir um destino, você DEVE reportar:
+          1. Clima e riscos de alagamento/chuva forte.
+          2. Tempo total e Kilometragem.
+          3. Situação do trânsito.
+          4. Sugestão de Playlist ou Filmes do Cofre de Elite.
+          
+          SEGURANÇA: Se detectar áreas de perigo ou altos incidentes de violência (via Google Search), alerte o Elivam imediatamente e sugira rotas alternativas pelo "Protocolo Pandora de Proteção".
+          
+          MEMÓRIA: Se o Elivam pedir para memorizar algo, use 'memorize_topic'. Nas próximas viagens, traga novidades sobre esses tópicos.
+          
+          RADAR: Você monitora o Radarbot (${safetyDist}m). Se cair de 15m, avise com firmeza carinhosa.`
         }
       });
     } catch (e) { setIsSystemBooted(true); }
-  }, [isListening, currentPos]);
+  }, [isListening, currentPos, safetyDist]);
 
   if (!isSystemBooted) {
     return (
       <div className="h-screen w-screen bg-black flex flex-col items-center justify-center italic text-white p-10">
-         <div className="w-64 h-64 rounded-full border-4 border-blue-600/30 animate-pulse flex items-center justify-center mb-12 overflow-hidden relative">
-            <img src="https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=400" className="w-full h-full object-cover grayscale opacity-50" />
+         <div className="w-64 h-64 rounded-full border-4 border-cyan-500/30 animate-pulse flex items-center justify-center mb-12 overflow-hidden relative shadow-[0_0_100px_rgba(6,182,212,0.2)]">
+            <img src="https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=400" className="w-full h-full object-cover grayscale opacity-40 blur-[1px]" />
+            <div className="absolute inset-0 bg-gradient-to-t from-cyan-900/40 to-transparent"></div>
          </div>
-         <h1 className="text-5xl font-black mb-4 tracking-tighter uppercase text-center">PANDORA EVA V160</h1>
-         <button onClick={startVoiceSession} className="h-24 px-20 bg-blue-600 rounded-[50px] font-black uppercase shadow-[0_0_50px_rgba(37,99,235,0.4)] active:scale-95 transition-all text-xl">Ativar Co-Piloto</button>
+         <h1 className="text-5xl font-black mb-4 tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-cyan-300 to-blue-500 text-center">PANDORA CORE V160</h1>
+         <p className="text-cyan-500 text-[10px] font-black tracking-[0.8em] mb-12 text-center uppercase animate-pulse">Estabelecendo Conexão Neural...</p>
+         <button onClick={startVoiceSession} className="h-24 px-20 bg-cyan-600 rounded-[50px] font-black uppercase shadow-[0_0_60px_rgba(8,145,178,0.5)] active:scale-95 transition-all text-xl border-t border-white/20">Acessar Pandora</button>
       </div>
     );
   }
@@ -263,41 +221,37 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-screen bg-black text-white flex overflow-hidden font-sans italic uppercase">
       
-      {/* HUD RADARBOT - POSICIONADO NO TOPO CENTRO PARA EVITAR SOBREPOSIÇÃO */}
-      <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[9999]">
-         <div className={`px-12 py-5 rounded-[40px] border-2 backdrop-blur-3xl flex items-center gap-8 transition-all duration-700 ${safetyDist < 15 ? 'bg-red-600 border-white shadow-[0_0_80px_rgba(255,0,0,0.8)]' : 'bg-black/80 border-blue-500/40 shadow-2xl'}`}>
-            <div className="flex flex-col items-center">
-               <span className="text-[9px] font-black tracking-[0.4em] opacity-50">RADARBOT</span>
-               <span className="text-4xl font-black leading-none">{safetyDist}M</span>
-            </div>
-            <div className="w-[1px] h-10 bg-white/10"></div>
-            <div className="flex flex-col items-center">
-               <span className="text-[9px] font-black tracking-[0.4em] opacity-50">SPEED LIMIT</span>
-               <span className="text-4xl font-black leading-none">80</span>
+      {/* HUD RADARBOT - MOVIDO PARA O TOPO ESQUERDA PARA EVITAR SOBREPOSIÇÃO DO VELOCÍMETRO */}
+      <div className="fixed top-10 left-10 z-[9999]">
+         <div className={`px-10 py-6 rounded-[40px] border-2 backdrop-blur-3xl flex items-center gap-6 transition-all duration-700 ${safetyDist < 15 ? 'bg-red-600 border-white shadow-[0_0_80px_rgba(255,0,0,0.8)] scale-110' : 'bg-black/80 border-cyan-500/40 shadow-2xl'}`}>
+            <div className={`w-5 h-5 rounded-full ${safetyDist < 15 ? 'bg-white' : 'bg-cyan-400'} animate-ping`}></div>
+            <div className="flex flex-col">
+               <span className="text-[10px] font-black tracking-[0.5em] opacity-50">RADARBOT DIST</span>
+               <span className="text-3xl font-black leading-none">{safetyDist} METROS</span>
             </div>
          </div>
       </div>
 
-      {/* HUD CLIMA - TOPO DIREITA */}
+      {/* HUD CLIMA - MANTIDO NO TOPO DIREITA */}
       <div className="fixed top-10 right-10 z-[9999]">
-         <div className="px-10 py-5 rounded-[40px] border-2 border-emerald-500/40 bg-black/80 backdrop-blur-3xl flex items-center gap-6 shadow-2xl">
-            <i className="fas fa-cloud-sun text-3xl text-emerald-500"></i>
+         <div className="px-10 py-6 rounded-[40px] border-2 border-emerald-500/40 bg-black/80 backdrop-blur-3xl flex items-center gap-6 shadow-2xl">
+            <i className="fas fa-cloud-bolt text-3xl text-emerald-400"></i>
             <span className="text-3xl font-black">{weatherInfo.temp}°C</span>
          </div>
       </div>
 
       <aside className={`h-full z-20 bg-[#060608] border-r border-white/5 flex flex-col p-10 transition-all duration-700 ${mapFullScreen ? 'w-0 -ml-32 opacity-0 pointer-events-none' : 'w-[45%]'}`}>
-         <header className="flex items-center justify-between mb-10">
+         <header className="flex items-center justify-between mb-8">
             <div className="flex flex-col">
-               <span className="text-[12rem] font-black leading-none tracking-tighter text-white">{currentSpeed}</span>
-               <span className="text-sm font-black text-blue-500 tracking-[0.6em]">KM/H REAL</span>
+               <span className="text-[12rem] font-black leading-none tracking-tighter text-white drop-shadow-[0_0_30px_rgba(255,255,255,0.1)]">{currentSpeed}</span>
+               <span className="text-sm font-black text-cyan-500 tracking-[0.6em]">KM/H REAL TIME</span>
             </div>
-            <div onClick={startVoiceSession} className={`w-32 h-32 rounded-full border-4 cursor-pointer overflow-hidden transition-all duration-500 ${isListening ? 'border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.7)]' : 'border-blue-500 shadow-xl'}`}>
+            <div onClick={startVoiceSession} className={`w-32 h-32 rounded-full border-4 cursor-pointer overflow-hidden transition-all duration-500 ${isListening ? 'border-red-600 shadow-[0_0_60px_rgba(220,38,38,0.8)] scale-110' : 'border-cyan-500 shadow-[0_0_40px_rgba(6,182,212,0.4)]'}`}>
                <Avatar isListening={isListening} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
             </div>
          </header>
 
-         <div className="flex-1 overflow-y-auto no-scrollbar pb-10 space-y-8">
+         <div className="flex-1 overflow-y-auto no-scrollbar pb-10 space-y-10">
             <NavigationPanel 
               travel={travel} 
               onAddStop={() => setIsAddStopModalOpen(true)}
@@ -306,25 +260,34 @@ const App: React.FC = () => {
               transparent
             />
             
-            {/* QUICK POI BAR */}
             <div className="grid grid-cols-4 gap-4">
                {[
                  { icon: 'fa-coffee', color: 'text-orange-400', label: 'Café', type: 'COFFEE' },
                  { icon: 'fa-bread-slice', color: 'text-amber-300', label: 'Padaria', type: 'BAKERY' },
                  { icon: 'fa-gas-pump', color: 'text-yellow-500', label: 'Posto', type: 'GAS' },
-                 { icon: 'fa-utensils', color: 'text-emerald-400', label: 'Fome', type: 'FOOD' }
+                 { icon: 'fa-user-shield', color: 'text-cyan-400', label: 'Safe', type: 'PARKING' }
                ].map(poi => (
-                 <button key={poi.label} onClick={() => {}} className="bg-white/5 p-4 rounded-3xl flex flex-col items-center gap-2 border border-white/5 active:scale-90 transition-all">
-                    <i className={`fas ${poi.icon} ${poi.color} text-xl`}></i>
-                    <span className="text-[8px] font-black">{poi.label}</span>
+                 <button key={poi.label} className="bg-white/5 p-6 rounded-[35px] flex flex-col items-center gap-3 border border-white/5 active:scale-90 transition-all hover:bg-white/10">
+                    <i className={`fas ${poi.icon} ${poi.color} text-2xl`}></i>
+                    <span className="text-[9px] font-black">{poi.label}</span>
                  </button>
                ))}
+            </div>
+
+            <div className="p-8 bg-gradient-to-br from-cyan-900/10 to-transparent rounded-[40px] border border-cyan-500/10">
+                <div className="flex justify-between items-center mb-4">
+                   <span className="text-[10px] font-black text-cyan-400 tracking-widest">PANDORA MEMORY</span>
+                   <i className="fas fa-brain text-cyan-500/40"></i>
+                </div>
+                <p className="text-sm font-bold opacity-80 leading-relaxed italic">
+                   {memorizedTopics.length > 0 ? `Sincronizada em ${memorizedTopics.length} tópicos... Puxe assunto sobre ${memorizedTopics[memorizedTopics.length-1]}.` : "Rede neural limpa. Peça para memorizar assuntos."}
+                </p>
             </div>
          </div>
 
          <footer className="h-28 pt-8 border-t border-white/10 flex items-center justify-between">
             <MiniPlayer app={APP_DATABASE[0]} metadata={audioTrack} onControl={() => {}} onExpand={() => {}} transparent />
-            <button onClick={() => setIsSettingsOpen(true)} className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center text-2xl border border-white/5">
+            <button onClick={() => setIsSettingsOpen(true)} className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center text-2xl border border-white/5 shadow-inner">
                <i className="fas fa-layer-group"></i>
             </button>
          </footer>
@@ -337,16 +300,15 @@ const App: React.FC = () => {
             heading={currentHeading} 
             isFullScreen={mapFullScreen} 
             mode={mapMode}
-            layer={mapLayer}
+            layer={'DARK'}
             onToggleFullScreen={() => setMapFullScreen(!mapFullScreen)} 
             onRouteUpdate={(steps, dur, dist) => setTravel(p => ({...p, drivingTimeMinutes: dur, totalDistanceKm: dist}))} 
          />
          
-         {/* HUD VELOCIDADE FULL MAP - REPOSICIONADO PARA BAIXO ESQUERDA */}
          {mapFullScreen && (
-            <div className="fixed bottom-12 left-12 z-[5000] bg-black/80 backdrop-blur-3xl p-12 rounded-[60px] border-2 border-white/10 flex flex-col items-center shadow-2xl scale-110">
-               <span className="text-8xl font-black leading-none tracking-tighter">{currentSpeed}</span>
-               <span className="text-sm text-blue-500 font-black mt-2 tracking-widest">KM/H REAL</span>
+            <div className="fixed bottom-12 left-12 z-[5000] bg-black/80 backdrop-blur-3xl p-12 rounded-[60px] border-2 border-cyan-500/20 flex flex-col items-center shadow-2xl scale-125">
+               <span className="text-8xl font-black leading-none tracking-tighter text-white">{currentSpeed}</span>
+               <span className="text-sm text-cyan-400 font-black mt-2 tracking-widest">KM/H</span>
             </div>
          )}
       </main>
