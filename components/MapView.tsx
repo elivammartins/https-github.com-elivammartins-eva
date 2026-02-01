@@ -30,16 +30,16 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, isFullScreen
         zoom: 17
       });
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(mapRef.current);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png').addTo(mapRef.current);
       
       const vehicleIcon = L.divIcon({
         className: 'vehicle-marker',
         html: `
-          <div style="width: 50px; height: 50px; background: #33CCFF; border: 4px solid white; border-radius: 50%; box-shadow: 0 0 30px rgba(51,204,255,0.8); display: flex; align-items: center; justify-content: center; transform: rotate(45deg);">
-            <i class="fas fa-location-arrow" style="color: white; font-size: 20px; transform: rotate(-45deg);"></i>
+          <div style="width: 60px; height: 60px; background: rgba(51,204,255,0.2); border: 3px solid #33CCFF; border-radius: 50%; box-shadow: 0 0 40px rgba(51,204,255,0.6); display: flex; align-items: center; justify-content: center; transform: rotate(45deg);">
+            <i class="fas fa-location-arrow" style="color: white; font-size: 24px; transform: rotate(-45deg);"></i>
           </div>
         `,
-        iconSize: [50, 50], iconAnchor: [25, 25]
+        iconSize: [60, 60], iconAnchor: [30, 30]
       });
 
       vehicleMarkerRef.current = L.marker(currentPosition, { icon: vehicleIcon }).addTo(mapRef.current);
@@ -60,97 +60,60 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, isFullScreen
   }, [currentPosition, isFullScreen]);
 
   useEffect(() => {
-    const fetchMultiRoute = async () => {
-      if (!mapRef.current || !travel.destinationCoords) return;
-
+    const updateMarkers = () => {
+      if (!mapRef.current) return;
       markersRef.current.forEach(m => mapRef.current.removeLayer(m));
       markersRef.current = [];
 
-      const coords = [
-        `${currentPosition[1]},${currentPosition[0]}`,
-        ...travel.stops.map(s => `${s.coords[1]},${s.coords[0]}`),
-        `${travel.destinationCoords[1]},${travel.destinationCoords[0]}`
-      ].join(';');
+      // Exibir avisos de radares/polícia (mesmo sem rota)
+      travel.warnings.forEach(w => {
+        let iconHtml = '';
+        if (w.type === 'RADAR') iconHtml = `<div class="bg-blue-600 w-10 h-10 rounded-xl flex items-center justify-center border-2 border-white shadow-lg animate-pulse"><i class="fas fa-camera text-white"></i></div>`;
+        else if (w.type === 'POLICE') iconHtml = `<div class="bg-orange-600 w-10 h-10 rounded-xl flex items-center justify-center border-2 border-white shadow-lg animate-bounce"><i class="fas fa-user-shield text-white"></i></div>`;
+        
+        if (iconHtml) {
+          const m = L.marker(w.coords, {
+             icon: L.divIcon({ className: 'warning-marker', html: iconHtml, iconSize: [40, 40] })
+          }).addTo(mapRef.current);
+          markersRef.current.push(m);
+        }
+      });
+    };
+    updateMarkers();
 
-      const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true&languages=pt-BR`;
-      
+    const fetchRoute = async () => {
+      if (!mapRef.current || !travel.destinationCoords) return;
+      const coords = [`${currentPosition[1]},${currentPosition[0]}`, ...travel.stops.map(s => `${s.coords[1]},${s.coords[0]}`), `${travel.destinationCoords[1]},${travel.destinationCoords[0]}`].join(';');
       try {
-        const res = await fetch(url);
+        const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true`);
         const data = await res.json();
-        if (data.routes && data.routes.length > 0) {
+        if (data.routes?.[0]) {
           const route = data.routes[0];
           if (routeLayerRef.current) mapRef.current.removeLayer(routeLayerRef.current);
-
-          routeLayerRef.current = L.geoJSON(route.geometry, { 
-            style: { color: '#33CCFF', weight: 12, opacity: 0.8, lineCap: 'round' } 
-          }).addTo(mapRef.current);
-          
-          if (!isFullScreen) mapRef.current.fitBounds(routeLayerRef.current.getBounds(), { padding: [100, 100] });
-
-          travel.stops.forEach((s, idx) => {
-             const m = L.marker(s.coords, {
-                icon: L.divIcon({ className: 'stop-m', html: `<i class="fas fa-location-pin text-blue-600 text-3xl shadow-lg"></i>`, iconSize: [30, 30] })
-             }).addTo(mapRef.current);
-             markersRef.current.push(m);
-          });
-
-          travel.warnings.forEach(w => {
-            let iconHtml = '';
-            if (w.type === 'RADAR') iconHtml = `<i class="fas fa-camera text-blue-500 text-2xl animate-pulse"></i>`;
-            else if (w.type === 'POLICE') iconHtml = `<i class="fas fa-user-shield text-orange-500 text-2xl animate-bounce"></i>`;
-            else if (w.type === 'FLOOD') iconHtml = `<i class="fas fa-water text-cyan-400 text-2xl"></i>`;
-            
-            if (iconHtml) {
-              const m = L.marker(w.coords, {
-                 icon: L.divIcon({ className: 'warning-m', html: iconHtml, iconSize: [30, 30] })
-              }).addTo(mapRef.current);
-              markersRef.current.push(m);
-            }
-          });
-
-          if (onRouteUpdate) {
-            const segments: RouteSegment[] = route.legs.map((l: any) => ({
-              distance: (l.distance / 1000).toFixed(1) + 'km',
-              duration: Math.round(l.duration / 60) + 'm'
-            }));
-            onRouteUpdate([], Math.round(route.duration / 60), Math.round(route.distance / 1000), segments);
-          }
+          routeLayerRef.current = L.geoJSON(route.geometry, { style: { color: '#33CCFF', weight: 10, opacity: 0.7 } }).addTo(mapRef.current);
+          if (onRouteUpdate) onRouteUpdate([], Math.round(route.duration / 60), Math.round(route.distance / 1000), []);
         }
-      } catch (e) { console.error("OSRM Multi Error:", e); }
+      } catch (e) {}
     };
-    fetchMultiRoute();
+    fetchRoute();
   }, [travel.destinationCoords, travel.stops, travel.warnings]);
 
   return (
-    <div className={`w-full h-full relative cursor-pointer group`} onClick={onToggleFullScreen}>
+    <div className={`w-full h-full relative cursor-pointer`} onClick={onToggleFullScreen}>
        <div ref={mapContainerRef} className="w-full h-full" />
-       
-       <div className="absolute top-10 left-10 pointer-events-none z-50">
-          <div className="flex flex-col gap-4">
-             <div className="px-6 py-3 bg-white text-slate-900 rounded-2xl shadow-2xl flex items-center gap-4 border-b-4 border-blue-600">
-                <i className="fas fa-compass text-2xl animate-spin-slow"></i>
-                <span className="text-xs font-black uppercase tracking-widest">{isFullScreen ? 'NAVEGAÇÃO TOTAL' : 'VISÃO COCKPIT'}</span>
-             </div>
-          </div>
-       </div>
-
-       <div className="absolute bottom-10 left-10 flex flex-col gap-4 pointer-events-none">
-          {travel.warnings.slice(0, 3).map(w => (
-            <div key={w.id} className="bg-black/80 backdrop-blur-xl text-white px-5 py-3 rounded-2xl font-black text-[11px] flex items-center gap-4 border border-white/10 shadow-2xl animate-fade-in">
-               <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
-                  <i className={`fas ${w.type === 'RADAR' ? 'fa-camera text-blue-400' : w.type === 'POLICE' ? 'fa-user-shield text-orange-400' : 'fa-triangle-exclamation text-red-400'}`}></i>
+       <div className="absolute bottom-10 left-10 flex flex-col gap-4 pointer-events-none z-50">
+          {travel.warnings.map(w => (
+            <div key={w.id} className="bg-black/90 backdrop-blur-xl border border-white/10 p-5 rounded-3xl flex items-center gap-5 animate-slide-in shadow-2xl">
+               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl ${w.type === 'RADAR' ? 'bg-blue-600' : 'bg-orange-600'}`}>
+                  <i className={`fas ${w.type === 'RADAR' ? 'fa-camera' : 'fa-user-shield'}`}></i>
                </div>
-               <div className="flex flex-col">
-                  <span className="leading-none">{w.description.toUpperCase()}</span>
-                  <span className="text-[9px] text-white/40 mt-1">{w.distance}M • {w.speedLimit ? `${w.speedLimit} KM/H` : 'ALERTA'}</span>
+               <div>
+                  <h4 className="text-sm font-black text-white">{w.description}</h4>
+                  <p className="text-[10px] text-white/40 font-bold tracking-widest">{w.distance} METROS • REDUZA</p>
                </div>
             </div>
           ))}
        </div>
-       <style>{`
-          .animate-spin-slow { animation: spin 8s linear infinite; }
-          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-       `}</style>
     </div>
   );
 };
