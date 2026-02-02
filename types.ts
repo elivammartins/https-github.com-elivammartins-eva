@@ -8,12 +8,11 @@ export interface LocationData {
 
 export type MapMode = '2D' | '3D' | 'SATELLITE' | 'STREET';
 export type MapLayer = 'DARK' | 'SATELLITE' | 'HYBRID';
-
-export type WarningType = 'RADAR' | 'ACCIDENT' | 'HAZARD' | 'POLICE' | 'TRAFFIC' | 'COLLISION' | 'FLOOD' | 'VIOLENCE';
+export type PrivacyMode = 'GHOST' | 'RESTRICTED' | 'TOTAL';
 
 export interface RouteWarning {
   id: string;
-  type: WarningType;
+  type: string;
   distance: number;
   description: string;
   coords: [number, number];
@@ -23,15 +22,6 @@ export interface StopInfo {
   id: string;
   name: string;
   type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'DESTINATION';
-  coords: [number, number];
-}
-
-export interface StopRecommendation {
-  id?: string;
-  name: string;
-  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'DEFAULT' | string;
-  distance: string;
-  rating: number;
   coords: [number, number];
 }
 
@@ -58,7 +48,7 @@ export interface MediaApp {
   name: string;
   icon: string;
   color: string;
-  category: 'AUDIO' | 'VIDEO' | 'COMM';
+  category: 'AUDIO' | 'VIDEO' | 'TV' | 'COMM';
   scheme: string;
 }
 
@@ -72,26 +62,43 @@ export interface StreamingCredential {
 export interface AppSettings {
   userName: string;
   voiceVolume: number;
-  privacyMode: boolean;
+  privacyMode: PrivacyMode;
   safetyDistance: number;
   alertVoiceEnabled: boolean;
   preferredMusicApp: string;
   preferredVideoApp: string;
+  preferredTvApp: string;
   credentials: StreamingCredential[];
-  // Telemetria Real
   totalOdometer: number;
   currentFuelLiters: number;
   odometerAtLastRefuel: number;
+}
+
+export interface MessageNotification {
+  id: string;
+  sender: string;
+  content: string;
+  timestamp: string;
+  app: 'WHATSAPP' | 'SMS' | 'PHONE';
+}
+
+export interface StopRecommendation {
+  id: string;
+  name: string;
+  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'PARK';
+  distance: string;
+  rating: number;
+  coords: [number, number];
 }
 
 export interface MeetingInfo {
   id: string;
   title: string;
   startTime: string;
-  attendees?: string[];
+  participants?: number;
 }
 
-export type CarAction = 'LOCK' | 'UNLOCK' | 'START' | 'STOP' | 'WINDOWS_UP' | 'WINDOWS_DOWN' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
+export type CarAction = 'LOCK' | 'START' | 'UNLOCK' | 'STOP' | 'WINDOWS_DOWN' | 'WINDOWS_UP' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
 
 export interface CarStatus {
   isLocked: boolean;
