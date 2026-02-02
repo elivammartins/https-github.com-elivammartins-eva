@@ -49,7 +49,6 @@ export interface TrackMetadata {
   artist: string;
   isPlaying: boolean;
   progress: number;
-  // Campos para séries e episódios
   season?: number;
   episode?: number;
 }
@@ -79,6 +78,10 @@ export interface AppSettings {
   preferredMusicApp: string;
   preferredVideoApp: string;
   credentials: StreamingCredential[];
+  // Telemetria Real
+  totalOdometer: number;
+  currentFuelLiters: number;
+  odometerAtLastRefuel: number;
 }
 
 export interface MeetingInfo {
