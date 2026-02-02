@@ -26,6 +26,7 @@ const APP_DATABASE: MediaApp[] = [
   { id: 'stremio', name: 'Stremio', icon: 'fas fa-film', color: 'text-purple-500', category: 'VIDEO', scheme: 'stremio://search?q=' },
   { id: 'claro_tv', name: 'Claro TV+', icon: 'fas fa-tv', color: 'text-red-500', category: 'TV', scheme: 'clarotv://' },
   { id: 'sky_plus', name: 'Sky+', icon: 'fas fa-satellite-dish', color: 'text-blue-500', category: 'TV', scheme: 'skyplus://' },
+  { id: 'vivo_play', name: 'Vivo Play', icon: 'fas fa-play-circle', color: 'text-purple-600', category: 'TV', scheme: 'vivoplay://' },
   { id: 'whatsapp', name: 'WhatsApp', icon: 'fab fa-whatsapp', color: 'text-emerald-500', category: 'COMM', scheme: 'whatsapp://send?text=' },
 ];
 
@@ -39,7 +40,7 @@ const App: React.FC = () => {
   const [activeMessage, setActiveMessage] = useState<MessageNotification | null>(null);
   
   const [settings, setSettings] = useState<AppSettings>(() => {
-    const saved = localStorage.getItem('pandora_settings_v162');
+    const saved = localStorage.getItem('pandora_settings_v166');
     return saved ? JSON.parse(saved) : {
       userName: 'ELIVAM', voiceVolume: 90, privacyMode: 'RESTRICTED', safetyDistance: 30, alertVoiceEnabled: true, 
       preferredMusicApp: 'spotify', preferredVideoApp: 'stremio', preferredTvApp: 'claro_tv',
@@ -51,14 +52,14 @@ const App: React.FC = () => {
   const [currentPos, setCurrentPos] = useState<[number, number]>([-15.7942, -47.8822]);
   const [safetyDist, setSafetyDist] = useState(0);
   const [travel, setTravel] = useState<TravelInfo>({ destination: 'AGUARDANDO DESTINO', stops: [], warnings: [], drivingTimeMinutes: 0, totalDistanceKm: 0 });
-  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'EVA CORE V162', artist: 'SISTEMA ATIVO', isPlaying: false, progress: 0 });
+  const [audioTrack, setAudioTrack] = useState<TrackMetadata>({ title: 'EVA CORE V166', artist: 'PROTOCOLO PANDORA', isPlaying: false, progress: 0 });
 
   const outputCtxRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const sessionRef = useRef<any>(null);
   const lastPosRef = useRef<[number, number] | null>(null);
 
-  useEffect(() => { localStorage.setItem('pandora_settings_v162', JSON.stringify(settings)); }, [settings]);
+  useEffect(() => { localStorage.setItem('pandora_settings_v166', JSON.stringify(settings)); }, [settings]);
   
   useEffect(() => {
     const timer = setInterval(() => {
@@ -89,8 +90,19 @@ const App: React.FC = () => {
 
   const handleSystemAction = async (fc: any) => {
     const { name, args } = fc;
-    if (name === 'send_whatsapp') return { result: `WHATSAPP ENVIADO: ${args.message}` };
-    if (name === 'open_tv_channel') return { result: `SINTONIZANDO CANAL ${args.channel} VIA ${args.app}` };
+    if (name === 'play_media') {
+      // Lógica Stranger Things: Se tiver Season/Episode, EVA já identificou o nome via AI
+      const query = args.episode_name ? `${args.title} ${args.episode_name}` : args.title;
+      return { result: `BUSCANDO: ${query} NO ${args.app.toUpperCase()}. PREFERÊNCIA IDIOMA: ${args.language}` };
+    }
+    if (name === 'open_tv_channel') {
+      const providers = settings.credentials.filter(c => ['claro_tv', 'sky_plus', 'vivo_play'].includes(c.appId));
+      if (providers.length > 1 && !args.confirmed_provider) {
+        return { result: "NEED_CONFIRMATION", message: `Identifiquei ${providers.map(p => p.appId).join(' e ')}. Qual deseja usar?` };
+      }
+      return { result: `SINTONIZANDO ${args.channel} VIA ${args.confirmed_provider || settings.preferredTvApp}` };
+    }
+    if (name === 'send_whatsapp') return { result: `ENVIANDO WHATSAPP PARA ${args.contact}: ${args.message}` };
     return { result: "OK" };
   };
 
@@ -104,7 +116,15 @@ const App: React.FC = () => {
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
-          onopen: () => { setIsListening(true); setIsSystemBooted(true); },
+          onopen: () => { 
+            setIsListening(true); setIsSystemBooted(true);
+            // Audio streaming logic preserved
+            const inputCtx = new AudioContext({ sampleRate: 16000 });
+            const source = inputCtx.createMediaStreamSource(stream);
+            const proc = inputCtx.createScriptProcessor(4096, 1, 1);
+            proc.onaudioprocess = (e) => { sessionPromise.then(s => s.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) })); };
+            source.connect(proc); proc.connect(inputCtx.destination);
+          },
           onmessage: async (msg: LiveServerMessage) => {
             if (msg.toolCall) {
               for (const fc of msg.toolCall.functionCalls) {
@@ -129,26 +149,28 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: [
-            { name: 'send_whatsapp', parameters: { type: Type.OBJECT, properties: { message: { type: Type.STRING } } } },
-            { name: 'open_tv_channel', parameters: { type: Type.OBJECT, properties: { channel: { type: Type.STRING }, app: { type: Type.STRING } } } }
+            { name: 'play_media', parameters: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, season: { type: Type.NUMBER }, episode: { type: Type.NUMBER }, episode_name: { type: Type.STRING }, app: { type: Type.STRING }, language: { type: Type.STRING } }, required: ['title', 'app'] } },
+            { name: 'open_tv_channel', parameters: { type: Type.OBJECT, properties: { channel: { type: Type.STRING }, confirmed_provider: { type: Type.STRING } }, required: ['channel'] } },
+            { name: 'send_whatsapp', parameters: { type: Type.OBJECT, properties: { contact: { type: Type.STRING }, message: { type: Type.STRING } } } }
           ]}],
-          systemInstruction: `EVA V162. Driver: ${settings.userName}. Odo: ${settings.totalOdometer.toFixed(1)}. 
-          PROTOCOLOS: PT-BR por padrão. EN-US se solicitado. 
-          TV: Se pedirem canal, use as credenciais de TV e pergunte qual app usar se houver mais de um.
-          PRIVACIDADE: ${settings.privacyMode}.`,
+          systemInstruction: `VOCÊ É A EVA PANDORA V166. Motorista: ${settings.userName}. Odômetro: ${settings.totalOdometer.toFixed(1)}.
+          REGRAS DE COMUNICAÇÃO:
+          1. Idioma padrão: PORTUGUÊS (Brasil). Se ouvir "speak English", mude.
+          2. BUSCA DE MÍDIA: Se pedirem série (ex: Stranger Things), use seu conhecimento para achar o nome do episódio. Tente primeiro em INGLÊS para Stremio, fallback PT-BR.
+          3. TV: Se houver múltiplos apps no cofre, pergunte qual usar.
+          4. PRIVACIDADE: Modo ${settings.privacyMode} ativo.`,
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } }
         }
       });
       sessionRef.current = await sessionPromise;
-      // Audio input streaming logic (omitted for brevity but preserved from previous)
     } catch (e) { setIsSystemBooted(true); }
   }, [isListening, settings]);
 
   if (!isSystemBooted) {
     return (
       <div className="h-screen w-screen bg-black flex flex-col items-center justify-center text-white p-12 uppercase italic">
-         <h1 className="text-6xl font-black mb-6 text-transparent bg-clip-text bg-gradient-to-r from-white to-cyan-400">EVA PANDORA V162</h1>
-         <button onClick={startVoiceSession} className="h-20 px-16 bg-cyan-600 rounded-full font-black text-xl shadow-[0_0_50px_rgba(6,182,212,0.4)] transition-all">Sincronizar Driver</button>
+         <h1 className="text-7xl font-black mb-6 text-transparent bg-clip-text bg-gradient-to-r from-white to-cyan-500">EVA PANDORA V166</h1>
+         <button onClick={startVoiceSession} className="h-24 px-20 bg-cyan-600 rounded-full font-black text-2xl shadow-[0_0_80px_rgba(6,182,212,0.4)] transition-all">Sincronizar Protocolo</button>
       </div>
     );
   }
@@ -160,7 +182,6 @@ const App: React.FC = () => {
       <aside className="h-full z-20 bg-[#020202] border-r border-white/5 flex flex-col w-[25%] transition-all duration-700 relative overflow-hidden">
          <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col p-2 space-y-4">
             
-            {/* VELOCÍMETRO */}
             <header className="shrink-0 pl-2 pt-2">
                <div className="flex flex-col items-start">
                   <span className="text-[6.5rem] font-black leading-none tracking-tighter text-white">{currentSpeed}</span>
@@ -178,6 +199,7 @@ const App: React.FC = () => {
                     <span className="text-lg">D</span>
                     <i className="fas fa-gas-pump text-cyan-400 text-xs"></i>
                   </div>
+                  {/* ODÔMETRO REAL ABAIXO DA BOMBA */}
                   <div className="text-[12px] font-black text-white/80 tracking-tighter">{settings.totalOdometer.toFixed(1)} KM</div>
                </div>
 
@@ -187,10 +209,12 @@ const App: React.FC = () => {
                         {safetyDist} <span className="text-[8px]">M</span>
                      </div>
                   </div>
+                  {/* CARRO HB20 3D PRESERVADO */}
                   <div className="absolute left-1/2 -translate-x-1/2 z-20 flex flex-col items-center transform-gpu" style={{ transform: 'rotateX(55deg) translateY(35px) scale(1.4)' }}>
-                     <div className="w-[54px] h-[34px] bg-[#e2e8f0] rounded-t-[22px] border-t-[3px] border-white relative">
-                        <div className={`absolute -left-1 bottom-[8px] w-[18px] h-[6px] ${safetyDist > 0 && safetyDist < settings.safetyDistance ? 'bg-red-500 animate-flash-adas' : 'bg-gray-400'}`}></div>
-                        <div className={`absolute -right-1 bottom-[8px] w-[18px] h-[6px] ${safetyDist > 0 && safetyDist < settings.safetyDistance ? 'bg-red-500 animate-flash-adas' : 'bg-gray-400'}`}></div>
+                     <div className="w-[54px] h-[34px] bg-[#e2e8f0] rounded-t-[22px] border-t-[3px] border-white relative shadow-[0_-10px_30px_rgba(255,255,255,0.2)]">
+                        <div className="absolute top-[5px] left-[8px] right-[8px] h-[16px] bg-[#0f172a] rounded-t-[12px]"></div>
+                        <div className={`absolute -left-1 bottom-[8px] w-[18px] h-[6px] transition-all ${safetyDist > 0 && safetyDist < settings.safetyDistance ? 'bg-red-500 shadow-[0_0_20px_red] animate-pulse' : 'bg-gray-400'}`}></div>
+                        <div className={`absolute -right-1 bottom-[8px] w-[18px] h-[6px] transition-all ${safetyDist > 0 && safetyDist < settings.safetyDistance ? 'bg-red-500 shadow-[0_0_20px_red] animate-pulse' : 'bg-gray-400'}`}></div>
                      </div>
                   </div>
                </div>
@@ -199,7 +223,7 @@ const App: React.FC = () => {
             <NavigationPanel travel={travel} onAddStop={() => setIsAddStopModalOpen(true)} onRemoveStop={() => {}} onSetDestination={() => setIsAddStopModalOpen(true)} transparent />
          </div>
 
-         {/* FOOTER - RELÓGIO + CONTROLE */}
+         {/* FOOTER FIXO: AVATAR + PLAYER + RELÓGIO (RODAPÉ) */}
          <footer className="shrink-0 h-[140px] pt-2 border-t border-white/10 flex flex-col gap-2 bg-[#020202] px-2 z-30">
             <div className="flex items-center gap-2">
                <div onClick={startVoiceSession} className={`w-11 h-11 shrink-0 rounded-full border border-cyan-500/30 overflow-hidden ${isListening ? 'border-red-600 shadow-[0_0_20px_red]' : ''}`}>
@@ -211,7 +235,7 @@ const App: React.FC = () => {
             </div>
             <div className="mt-1 pl-2 border-l-2 border-cyan-500/20">
                <span className="text-4xl font-black text-white italic tracking-tighter leading-none">{currentTime}</span>
-               <p className="text-[6px] font-bold text-cyan-500/40 tracking-[0.4em] uppercase mt-0.5">EVA CORE V162 ACTIVE</p>
+               <p className="text-[6px] font-bold text-cyan-500/40 tracking-[0.4em] mt-0.5 uppercase">EVA CORE V166 ACTIVE</p>
             </div>
          </footer>
       </aside>
@@ -219,19 +243,29 @@ const App: React.FC = () => {
       <main className="flex-1 h-full relative bg-[#080808]">
          <MapView travel={travel} currentPosition={currentPos} heading={0} isFullScreen={true} mode={'3D'} layer={'DARK'} onToggleFullScreen={() => {}} />
          
-         {/* OVERLAY DE MENSAGENS COM MODO DE PRIVACIDADE */}
+         {/* MODO CUIDADO (Safety Drive Video) */}
+         {currentSpeed > 5 && (
+            <div className="absolute top-4 right-4 z-[100] px-4 py-2 bg-red-600/90 backdrop-blur-xl border border-white/20 rounded-full flex items-center gap-3 shadow-2xl animate-pulse">
+               <i className="fas fa-eye text-white text-xs"></i>
+               <span className="text-[9px] font-black text-white tracking-[0.2em]">MODO CUIDADO: VÍDEO BLOQUEADO PARA CONDUÇÃO</span>
+            </div>
+         )}
+
+         {/* OVERLAY DE MENSAGENS (MODO PRIVACIDADE) */}
          {activeMessage && (
-           <div className="absolute top-10 left-10 max-w-lg z-[1000] animate-slide-in">
+           <div className={`absolute top-10 left-10 z-[1000] animate-slide-in ${settings.privacyMode === 'TOTAL' ? 'w-[60%] max-w-2xl' : 'max-w-lg'}`}>
               <div className="bg-black/90 backdrop-blur-3xl border-2 border-emerald-500/50 rounded-[40px] p-8 shadow-2xl">
                  <div className="flex items-center gap-4 mb-4">
                     <i className="fab fa-whatsapp text-4xl text-emerald-500"></i>
                     <div>
-                       <h3 className="text-2xl font-black">{settings.privacyMode === 'GHOST' ? 'MENSAGEM PRIVADA' : activeMessage.sender}</h3>
-                       <span className="text-[10px] opacity-40">NOTIFICAÇÃO PANDORA</span>
+                       <h3 className="text-2xl font-black">
+                          {settings.privacyMode === 'GHOST' ? 'DADOS PRIVADOS' : activeMessage.sender}
+                       </h3>
+                       <span className="text-[10px] opacity-40 uppercase">PROTOCOL PANDORA</span>
                     </div>
                  </div>
                  <p className="text-lg font-bold leading-relaxed italic uppercase">
-                    {settings.privacyMode === 'GHOST' ? 'PANDORA: Conteúdo Oculto. Diga "Ler Mensagem" para autorizar.' : 
+                    {settings.privacyMode === 'GHOST' ? 'EVA: Notificação Oculta. Diga "Ler Mensagem" para autorizar.' : 
                      settings.privacyMode === 'RESTRICTED' ? `${activeMessage.content.substring(0, 128)}...` : 
                      activeMessage.content}
                  </p>
@@ -248,6 +282,8 @@ const App: React.FC = () => {
          .animate-flash-adas { animation: flash-adas 0.4s infinite; }
          ::-webkit-scrollbar { display: none; }
          .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+         @keyframes slideIn { from { transform: translateX(-100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+         .animate-slide-in { animation: slideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
       `}</style>
     </div>
   );
