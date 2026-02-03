@@ -8,30 +8,45 @@ export interface LocationData {
 
 export type MapMode = '2D' | '3D' | 'SATELLITE' | 'STREET';
 export type MapLayer = 'DARK' | 'SATELLITE' | 'HYBRID';
-export type PrivacyMode = 'GHOST' | 'RESTRICTED' | 'TOTAL';
 
-export interface RouteWarning {
-  id: string;
-  type: string;
+export interface RouteStep {
+  instruction: string;
   distance: number;
-  description: string;
-  coords: [number, number];
+  type: string;
 }
 
-export interface StopInfo {
-  id: string;
-  name: string;
-  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'DESTINATION';
-  coords: [number, number];
+export interface WeatherTelemetry {
+  temp: number;
+  condition: string;
+  floodRisk: 'LOW' | 'MEDIUM' | 'HIGH';
+  precipProb: number;
+  alertTitle?: string;
+}
+
+export interface SecurityTelemetry {
+  violenceIndex: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+  policeNearby: boolean;
+  radarDistance: number;
+  radarLimit: number;
+  lanePosition: 'LEFT' | 'CENTER' | 'RIGHT';
+  vehicleAheadDistance: number;
+}
+
+export interface CarTelemetry {
+  fuelLevel: number; 
+  autonomyKm: number;
+  odometer: number;
+  isFuelLow: boolean;
+  model: string;
 }
 
 export interface TravelInfo {
   destination: string;
   destinationCoords?: [number, number];
-  stops: StopInfo[];
-  warnings: RouteWarning[];
+  stops: any[];
   drivingTimeMinutes: number;
   totalDistanceKm: number;
+  nextStep?: RouteStep;
 }
 
 export interface TrackMetadata {
@@ -39,8 +54,8 @@ export interface TrackMetadata {
   artist: string;
   isPlaying: boolean;
   progress: number;
-  season?: number;
-  episode?: number;
+  season?: number | string;
+  episode?: number | string;
 }
 
 export interface MediaApp {
@@ -52,6 +67,11 @@ export interface MediaApp {
   scheme: string;
 }
 
+// Fix: Added missing types for video playback and privacy modes
+export type VideoPlaybackMode = 'PIP' | 'FULL';
+export type PrivacyMode = 'GHOST' | 'RESTRICTED' | 'TOTAL';
+
+// Fix: Added missing interface for streaming credentials
 export interface StreamingCredential {
   appId: string;
   user: string;
@@ -62,40 +82,16 @@ export interface StreamingCredential {
 export interface AppSettings {
   userName: string;
   voiceVolume: number;
-  privacyMode: PrivacyMode;
   safetyDistance: number;
-  alertVoiceEnabled: boolean;
-  preferredMusicApp: string;
-  preferredVideoApp: string;
-  preferredTvApp: string;
+  videoPlaybackMode: VideoPlaybackMode;
+  privacyMode: PrivacyMode;
+  // Fix: Added credentials array to AppSettings
   credentials: StreamingCredential[];
-  totalOdometer: number;
-  currentFuelLiters: number;
-  odometerAtLastRefuel: number;
-}
-
-export interface MessageNotification {
-  id: string;
-  sender: string;
-  content: string;
-  timestamp: string;
-  app: 'WHATSAPP' | 'SMS' | 'PHONE';
-}
-
-export interface StopRecommendation {
-  id: string;
-  name: string;
-  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'PARK';
-  distance: string;
-  rating: number;
-  coords: [number, number];
 }
 
 export interface MeetingInfo {
-  id: string;
   title: string;
   startTime: string;
-  participants?: number;
 }
 
 export type CarAction = 'LOCK' | 'START' | 'UNLOCK' | 'STOP' | 'WINDOWS_DOWN' | 'WINDOWS_UP' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
@@ -106,4 +102,12 @@ export interface CarStatus {
   areWindowsOpen: boolean;
   hazardActive: boolean;
   isUpdating: boolean;
+}
+
+// Fix: Added missing StopRecommendation interface
+export interface StopRecommendation {
+  name: string;
+  distance: string;
+  rating: number;
+  type: string;
 }

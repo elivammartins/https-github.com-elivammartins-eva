@@ -30,10 +30,10 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, mod
         zoomControl: false, 
         attributionControl: false, 
         center: currentPosition, 
-        zoom: 19, 
+        zoom: 18, 
         scrollWheelZoom: false, 
         doubleClickZoom: false,
-        dragging: true, // Permitir arrasto para ajuste fino se necessário
+        dragging: true,
         fadeAnimation: true
       });
 
@@ -46,20 +46,17 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, mod
         html: `
           <div id="nav-arrow" class="nav-container" style="transform: rotate(${heading}deg);">
             <div class="glow-effect"></div>
-            <svg width="70" height="70" viewBox="0 0 100 100">
-               <path d="M50 0 L100 100 L50 80 L0 100 Z" fill="#06B6D4" stroke="white" stroke-width="6" />
+            <svg width="60" height="60" viewBox="0 0 100 100">
+               <path d="M50 0 L100 100 L50 80 L0 100 Z" fill="#06B6D4" stroke="white" stroke-width="4" />
             </svg>
           </div>
         `,
-        iconSize: [70, 70], iconAnchor: [35, 35]
+        iconSize: [60, 60], iconAnchor: [30, 30]
       });
 
       vehicleMarkerRef.current = L.marker(currentPosition, { icon: vehicleIcon }).addTo(mapRef.current);
       
-      // Forçar atualização de tamanho após render inicial
-      setTimeout(() => {
-        mapRef.current.invalidateSize();
-      }, 500);
+      setTimeout(() => { mapRef.current.invalidateSize(); }, 500);
     }
   }, []);
 
@@ -68,15 +65,13 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, mod
     const mapEl = mapContainerRef.current;
     if (mapEl) {
       if (mode === '3D') {
-        // Estilo HUD: Perspectiva com escala aumentada para evitar bordas vazias
         mapEl.style.perspectiveOrigin = '50% 100%'; 
-        mapEl.style.transform = 'perspective(1400px) rotateX(55deg) scale(1.8) translateY(-15%)';
-        mapRef.current.setZoom(19); 
+        mapEl.style.transform = 'perspective(1200px) rotateX(45deg) scale(1.6) translateY(-10%)';
+        mapRef.current.setZoom(18); 
       } else {
         mapEl.style.transform = 'none';
-        mapRef.current.setZoom(17);
+        mapRef.current.setZoom(16);
       }
-      // Revalidar tamanho sempre que o modo muda
       setTimeout(() => mapRef.current.invalidateSize(), 300);
     }
   }, [mode]);
@@ -84,57 +79,20 @@ const MapView: React.FC<MapViewProps> = ({ travel, currentPosition, heading, mod
   useEffect(() => {
     if (vehicleMarkerRef.current) {
       vehicleMarkerRef.current.setLatLng(currentPosition);
-      const arrow = document.getElementById('nav-arrow');
-      if (arrow) arrow.style.transform = `rotate(${heading}deg)`;
     }
     if (mapRef.current) {
-      // Offset maior para visão 3D manter o carro "mais perto" do motorista
-      const offsetPos: [number, number] = [currentPosition[0] + 0.00025, currentPosition[1]];
-      mapRef.current.panTo(offsetPos, { animate: true, duration: 0.8 });
+      mapRef.current.panTo(currentPosition, { animate: true, duration: 0.5 });
     }
-  }, [currentPosition, heading]);
-
-  useEffect(() => {
-    const fetchRoute = async () => {
-      if (!mapRef.current || (!travel.destinationCoords && travel.stops.length === 0)) {
-        if (routeLayerRef.current) mapRef.current.removeLayer(routeLayerRef.current);
-        return;
-      }
-      
-      const destination = travel.destinationCoords || [currentPosition[0], currentPosition[1]];
-      const waypoints = [
-        `${currentPosition[1]},${currentPosition[0]}`, 
-        ...travel.stops.map(s => `${s.coords[1]},${s.coords[0]}`), 
-        `${destination[1]},${destination[0]}`
-      ].join(';');
-
-      try {
-        const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${waypoints}?overview=full&geometries=geojson`);
-        const data = await res.json();
-        
-        if (data.routes?.[0]) {
-          if (routeLayerRef.current) mapRef.current.removeLayer(routeLayerRef.current);
-          routeLayerRef.current = L.geoJSON(data.routes[0].geometry, { 
-            style: { color: '#06B6D4', weight: 40, opacity: 0.9, lineJoin: 'round', lineCap: 'round' } 
-          }).addTo(mapRef.current);
-
-          if (onRouteUpdate) {
-            onRouteUpdate([], Math.round(data.routes[0].duration/60), Math.round(data.routes[0].distance/1000), []);
-          }
-        }
-      } catch (e) { console.error("OSRM Failure", e); }
-    };
-    fetchRoute();
-  }, [travel.destinationCoords, travel.stops.length]);
+  }, [currentPosition]);
 
   return (
     <div className="absolute inset-0 w-full h-full overflow-hidden bg-[#080808]">
       <div ref={mapContainerRef} className="absolute inset-0 w-full h-full transition-all duration-1000 ease-in-out origin-center" />
       <style>{`
-        .nav-container { position: relative; width: 70px; height: 70px; transition: transform 0.1s linear; filter: drop-shadow(0 0 25px rgba(6,182,212,0.8)); }
-        .glow-effect { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; background: #06B6D4; filter: blur(35px); transform: translate(-50%, -50%); opacity: 0.7; }
+        .nav-container { position: relative; width: 60px; height: 60px; filter: drop-shadow(0 0 20px rgba(6,182,212,0.6)); }
+        .glow-effect { position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; background: #06B6D4; filter: blur(30px); transform: translate(-50%, -50%); opacity: 0.5; }
         .vehicle-marker { pointer-events: none !important; }
-        .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(0.4) contrast(1.4) saturate(0.5); }
+        .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(0.4) contrast(1.2) saturate(0.6); }
         .leaflet-container { background: #080808 !important; }
       `}</style>
     </div>
