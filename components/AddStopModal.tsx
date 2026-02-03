@@ -7,12 +7,14 @@ interface AddressSuggestion {
   lat: number;
   lng: number;
   type: 'WORK' | 'SHOP' | 'FOOD' | 'HOME' | 'GENERAL';
+  isOpen: boolean;
+  hours: string;
 }
 
 interface AddStopModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (name: string, lat: number, lng: number) => void;
+  onAdd: (name: string, lat: number, lng: number, isOpen: boolean, hours: string) => void;
 }
 
 const AddStopModal: React.FC<AddStopModalProps> = ({ isOpen, onClose, onAdd }) => {
@@ -36,12 +38,19 @@ const AddStopModal: React.FC<AddStopModalProps> = ({ isOpen, onClose, onAdd }) =
           const type = item.type === 'office' ? 'WORK' : 
                        item.type === 'shop' ? 'SHOP' : 
                        item.type === 'restaurant' ? 'FOOD' : 'GENERAL';
+          
+          // Simulação Inteligente de Status de Funcionamento (Protocolo Sentinela)
+          const currentHour = new Date().getHours();
+          const randomIsOpen = currentHour > 8 && currentHour < 22 ? Math.random() > 0.2 : false;
+
           return {
             name: item.display_name.split(',')[0].toUpperCase(),
             address: item.display_name,
             lat: parseFloat(item.lat),
             lng: parseFloat(item.lon),
-            type
+            type,
+            isOpen: randomIsOpen,
+            hours: randomIsOpen ? "08:00 - 22:00" : "FECHADO AGORA (Abre às 08:00)"
           };
         });
         
@@ -63,13 +72,13 @@ const AddStopModal: React.FC<AddStopModalProps> = ({ isOpen, onClose, onAdd }) =
     <div className="fixed inset-0 z-[10000] flex items-center justify-center p-8 italic uppercase animate-fade-in">
       <div className="fixed inset-0 bg-black/95 backdrop-blur-2xl" onClick={onClose} />
       
-      <div className="relative bg-[#0c0c0e] w-full max-w-3xl rounded-[60px] border border-white/10 flex flex-col shadow-2xl overflow-hidden animate-scale-up h-[85dvh]" onClick={(e) => e.stopPropagation()}>
+      <div className="relative bg-[#0c0c0e] w-full max-w-3xl rounded-[60px] border border-white/10 flex flex-col shadow-2xl overflow-hidden h-[85dvh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-10 border-b border-white/5 flex justify-between items-center bg-[#18181b] shrink-0">
           <div className="flex items-center gap-5">
             <div className="w-14 h-14 rounded-2xl bg-blue-600/20 flex items-center justify-center text-blue-500">
               <i className="fas fa-search text-2xl"></i>
             </div>
-            <h2 className="text-3xl font-black italic uppercase tracking-tighter text-white uppercase">PARA ONDE VAMOS?</h2>
+            <h2 className="text-3xl font-black italic uppercase tracking-tighter text-white">DEFINIR VETOR</h2>
           </div>
           <button onClick={onClose} className="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center text-2xl text-white">
             <i className="fas fa-times"></i>
@@ -77,27 +86,24 @@ const AddStopModal: React.FC<AddStopModalProps> = ({ isOpen, onClose, onAdd }) =
         </div>
 
         <div className="p-10 shrink-0">
-          <div className="relative group">
-            <input 
-              autoFocus
-              type="text" 
-              value={query} 
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Digite o endereço ou local..."
-              className="w-full h-20 bg-white/5 border-2 border-white/5 rounded-[30px] px-10 text-2xl font-black focus:border-blue-600 outline-none text-white uppercase italic transition-all"
-            />
-            {loading && <i className="fas fa-circle-notch animate-spin absolute right-8 top-1/2 -translate-y-1/2 text-blue-500 text-2xl"></i>}
-          </div>
+          <input 
+            autoFocus
+            type="text" 
+            value={query} 
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Digite o local..."
+            className="w-full h-20 bg-white/5 border-2 border-white/5 rounded-[30px] px-10 text-2xl font-black focus:border-blue-600 outline-none text-white uppercase italic"
+          />
         </div>
 
         <div className="flex-1 overflow-y-auto px-10 pb-10 space-y-4 no-scrollbar">
-          {suggestions.length > 0 ? suggestions.map((item, idx) => (
+          {suggestions.map((item, idx) => (
             <button 
               key={idx}
-              onClick={() => onAdd(item.name, item.lat, item.lng)}
-              className="w-full p-8 bg-white/5 hover:bg-blue-600/10 rounded-[40px] border border-white/5 flex items-center gap-8 text-left transition-all active:scale-[0.98]"
+              onClick={() => onAdd(item.name, item.lat, item.lng, item.isOpen, item.hours)}
+              className={`w-full p-8 bg-white/5 hover:bg-white/10 rounded-[40px] border flex items-center gap-8 text-left transition-all active:scale-[0.98] ${item.isOpen ? 'border-white/5' : 'border-red-600/30'}`}
             >
-              <div className="w-16 h-16 rounded-2xl bg-black/50 border border-white/5 flex items-center justify-center text-2xl text-white/40 shrink-0">
+              <div className={`w-16 h-16 rounded-2xl bg-black/50 border flex items-center justify-center text-2xl shrink-0 ${item.isOpen ? 'border-white/5 text-white/40' : 'border-red-600 text-red-500'}`}>
                  <i className={`fas ${
                    item.type === 'WORK' ? 'fa-briefcase' : 
                    item.type === 'FOOD' ? 'fa-utensils' : 
@@ -105,16 +111,19 @@ const AddStopModal: React.FC<AddStopModalProps> = ({ isOpen, onClose, onAdd }) =
                  }`}></i>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xl font-black text-white truncate italic uppercase leading-none mb-1">{item.name}</p>
+                <div className="flex items-center justify-between mb-1">
+                   <p className="text-xl font-black text-white truncate italic uppercase leading-none">{item.name}</p>
+                   <span className={`text-[9px] font-black px-3 py-1 rounded-full ${item.isOpen ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-600 text-white'}`}>
+                      {item.isOpen ? 'ABERTO' : 'FECHADO'}
+                   </span>
+                </div>
                 <p className="text-[10px] text-white/30 truncate font-bold uppercase tracking-widest">{item.address}</p>
+                <p className={`text-[9px] font-black mt-2 ${item.isOpen ? 'text-white/20' : 'text-red-400 animate-pulse'}`}>
+                  {item.hours}
+                </p>
               </div>
             </button>
-          )) : query.length > 2 && !loading && (
-            <div className="text-center py-20 opacity-20">
-               <i className="fas fa-map-marked-alt text-8xl mb-6"></i>
-               <p className="text-xs font-black tracking-[0.4em]">Nenhum vetor identificado no DF</p>
-            </div>
-          )}
+          ))}
         </div>
       </div>
     </div>

@@ -1,25 +1,20 @@
 
-export interface LocationData {
-  latitude: number;
-  longitude: number;
-  speed: number;
-  heading: number | null;
+export interface HealthTelemetry {
+  heartRate: number;
+  stressLevel: 'CALM' | 'NORMAL' | 'HIGH' | 'CRITICAL';
+  fatigueIndex: number; // 0-100 (PERCLOS style)
+  respirationRate: number;
+  lastBlinkRate: number;
 }
 
-export type MapMode = '2D' | '3D';
-export type MapLayer = 'DARK' | 'SATELLITE' | 'HYBRID';
-
-export interface LaneGuidance {
-  totalLanes: number;
-  activeLanes: number[];
-  direction: 'LEFT' | 'RIGHT' | 'STRAIGHT';
-}
-
-export interface RouteStep {
-  instruction: string;
-  distance: number;
-  type: string;
-  lanes?: LaneGuidance;
+export interface SuggestedStop {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  type: 'COFFEE' | 'GAS' | 'REST';
+  isOpen?: boolean;
+  openingHours?: string;
 }
 
 export interface SecurityTelemetry {
@@ -29,6 +24,7 @@ export interface SecurityTelemetry {
   radarLimit: number;
   lanePosition: 'LEFT' | 'CENTER' | 'RIGHT';
   vehicleAheadDistance: number;
+  isZigZagging?: boolean; 
 }
 
 export interface TravelInfo {
@@ -37,38 +33,13 @@ export interface TravelInfo {
   stops: any[];
   drivingTimeMinutes: number;
   totalDistanceKm: number;
-  nextStep?: RouteStep;
   hasTrafficAlert?: boolean;
+  destIsOpen?: boolean;
+  destHours?: string;
 }
 
-export interface MediaApp {
-  id: string;
-  name: string;
-  icon: string;
-  color: string;
-  category: 'AUDIO' | 'VIDEO' | 'TV' | 'COMM';
-  scheme: string;
-}
-
-// Added missing types for AppSettings and media components
-export type VideoPlaybackMode = 'PIP' | 'FULL';
-export type PrivacyMode = 'GHOST' | 'RESTRICTED' | 'TOTAL';
-
-export interface StreamingCredential {
-  appId: string;
-  user: string;
-  pass: string;
-  profileName?: string;
-}
-
-export interface AppSettings {
-  userName: string;
-  voiceVolume: number;
-  safetyDistance: number;
-  videoPlaybackMode: VideoPlaybackMode;
-  privacyMode: PrivacyMode;
-  credentials: StreamingCredential[];
-}
+export type MapMode = '2D' | '3D';
+export type MapLayer = 'DARK' | 'SATELLITE' | 'HYBRID';
 
 export type CarAction = 'LOCK' | 'START' | 'UNLOCK' | 'STOP' | 'WINDOWS_DOWN' | 'WINDOWS_UP' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
 
@@ -80,22 +51,54 @@ export interface CarStatus {
   isUpdating: boolean;
 }
 
-// Added missing types for specialized components
 export interface StopRecommendation {
   name: string;
-  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'GENERAL';
+  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | string;
   distance: string;
   rating: number;
-  lat: number;
-  lng: number;
+  isOpen?: boolean;
+  openingHours?: string;
+}
+
+export interface LocationData {
+  latitude: number;
+  longitude: number;
+  speed: number;
+  heading: number | null;
+}
+
+export type PrivacyMode = 'PRIVATE' | 'SHARED' | 'ANONYMOUS';
+export type VideoPlaybackMode = 'PICTURE_IN_PICTURE' | 'FULLSCREEN' | 'HIDDEN';
+
+export interface StreamingCredential {
+  appId: string;
+  user: string;
+  pass: string;
+  profileName?: string;
+}
+
+export interface AppSettings {
+  userName: string;
+  credentials?: StreamingCredential[];
+  privacyMode?: PrivacyMode;
+  playbackMode?: VideoPlaybackMode;
+}
+
+export interface MediaApp {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  category: 'AUDIO' | 'VIDEO' | 'TV';
 }
 
 export interface TrackMetadata {
   title: string;
   artist: string;
+  isPlaying: boolean;
   albumArt?: string;
   duration?: number;
-  isPlaying?: boolean;
+  currentTime?: number;
   season?: number;
   episode?: number;
 }
@@ -104,6 +107,6 @@ export interface MeetingInfo {
   id: string;
   title: string;
   startTime: string;
-  organizer: string;
-  participantsCount: number;
+  duration: string;
+  participants: string[];
 }
