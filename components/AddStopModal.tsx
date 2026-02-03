@@ -6,7 +6,7 @@ interface AddressSuggestion {
   address: string;
   lat: number;
   lng: number;
-  type: 'WORK' | 'SHOP' | 'FOOD' | 'HOME' | 'GENERAL';
+  type: 'CITY' | 'SHOP' | 'FOOD' | 'GENERAL';
   isOpen: boolean;
   hours: string;
 }
@@ -31,17 +31,26 @@ const AddStopModal: React.FC<AddStopModalProps> = ({ isOpen, onClose, onAdd }) =
       
       setLoading(true);
       try {
-        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=8&addressdetails=1`);
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=6&addressdetails=1`);
         const data = await response.json();
         
         const mapped = data.map((item: any) => {
-          const type = item.type === 'office' ? 'WORK' : 
-                       item.type === 'shop' ? 'SHOP' : 
-                       item.type === 'restaurant' ? 'FOOD' : 'GENERAL';
+          // Identificação de Vetores Geográficos (Cidades, Bairros, etc)
+          const isGeoVector = 
+            item.type === 'city' || 
+            item.type === 'administrative' || 
+            item.type === 'suburb' || 
+            item.addresstype === 'city' ||
+            item.addresstype === 'suburb' ||
+            item.addresstype === 'village';
           
-          // Simulação Inteligente de Status de Funcionamento (Protocolo Sentinela)
+          const type = isGeoVector ? 'CITY' : 
+                       (item.type === 'shop' || item.type === 'mall' ? 'SHOP' : 
+                       (item.type === 'restaurant' || item.type === 'cafe' ? 'FOOD' : 'GENERAL'));
+          
           const currentHour = new Date().getHours();
-          const randomIsOpen = currentHour > 8 && currentHour < 22 ? Math.random() > 0.2 : false;
+          // Lógica: Cidades e Bairros não fecham. Comércios seguem regra de horário.
+          const isOpen = isGeoVector ? true : (currentHour >= 8 && currentHour < 21);
 
           return {
             name: item.display_name.split(',')[0].toUpperCase(),
@@ -49,14 +58,14 @@ const AddStopModal: React.FC<AddStopModalProps> = ({ isOpen, onClose, onAdd }) =
             lat: parseFloat(item.lat),
             lng: parseFloat(item.lon),
             type,
-            isOpen: randomIsOpen,
-            hours: randomIsOpen ? "08:00 - 22:00" : "FECHADO AGORA (Abre às 08:00)"
+            isOpen: isOpen,
+            hours: isGeoVector ? "VETOR LIVRE (24H)" : "08:00 - 21:00"
           };
         });
         
         setSuggestions(mapped);
       } catch (err) {
-        console.error("Search Error:", err);
+        console.error("Erro na busca OSM:", err);
       } finally {
         setLoading(false);
       }
@@ -69,58 +78,47 @@ const AddStopModal: React.FC<AddStopModalProps> = ({ isOpen, onClose, onAdd }) =
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-8 italic uppercase animate-fade-in">
-      <div className="fixed inset-0 bg-black/95 backdrop-blur-2xl" onClick={onClose} />
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 italic uppercase animate-fade-in">
+      <div className="fixed inset-0 bg-black/98" onClick={onClose} />
       
-      <div className="relative bg-[#0c0c0e] w-full max-w-3xl rounded-[60px] border border-white/10 flex flex-col shadow-2xl overflow-hidden h-[85dvh]" onClick={(e) => e.stopPropagation()}>
-        <div className="p-10 border-b border-white/5 flex justify-between items-center bg-[#18181b] shrink-0">
-          <div className="flex items-center gap-5">
-            <div className="w-14 h-14 rounded-2xl bg-blue-600/20 flex items-center justify-center text-blue-500">
-              <i className="fas fa-search text-2xl"></i>
-            </div>
-            <h2 className="text-3xl font-black italic uppercase tracking-tighter text-white">DEFINIR VETOR</h2>
-          </div>
-          <button onClick={onClose} className="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center text-2xl text-white">
+      <div className="relative bg-[#0c0c0e] w-full max-w-2xl rounded-[50px] border border-white/10 flex flex-col shadow-2xl overflow-hidden h-[85dvh]" onClick={(e) => e.stopPropagation()}>
+        <div className="p-8 border-b border-white/5 flex justify-between items-center bg-[#151518] shrink-0">
+          <h2 className="text-3xl font-black text-white italic tracking-tighter uppercase">Definir Vetor</h2>
+          <button onClick={onClose} className="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center text-white border border-white/10">
             <i className="fas fa-times"></i>
           </button>
         </div>
 
-        <div className="p-10 shrink-0">
+        <div className="p-8 shrink-0">
           <input 
             autoFocus
             type="text" 
             value={query} 
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Digite o local..."
-            className="w-full h-20 bg-white/5 border-2 border-white/5 rounded-[30px] px-10 text-2xl font-black focus:border-blue-600 outline-none text-white uppercase italic"
+            placeholder="Qual o destino comandante?"
+            className="w-full h-20 bg-white/5 border border-white/10 rounded-3xl px-10 text-2xl font-black text-white outline-none focus:border-blue-500 uppercase italic placeholder:text-white/10 shadow-inner"
           />
         </div>
 
-        <div className="flex-1 overflow-y-auto px-10 pb-10 space-y-4 no-scrollbar">
+        <div className="flex-1 overflow-y-auto px-8 pb-8 space-y-4 no-scrollbar">
+          {loading && <div className="text-center py-10 animate-pulse text-blue-500 font-black">Escaneando Mapas...</div>}
           {suggestions.map((item, idx) => (
             <button 
               key={idx}
               onClick={() => onAdd(item.name, item.lat, item.lng, item.isOpen, item.hours)}
-              className={`w-full p-8 bg-white/5 hover:bg-white/10 rounded-[40px] border flex items-center gap-8 text-left transition-all active:scale-[0.98] ${item.isOpen ? 'border-white/5' : 'border-red-600/30'}`}
+              className={`w-full p-8 bg-white/5 hover:bg-white/10 rounded-[40px] border flex items-center gap-8 text-left transition-all active:scale-95 ${item.isOpen ? 'border-white/5 shadow-lg' : 'border-red-600/40 bg-red-600/5'}`}
             >
-              <div className={`w-16 h-16 rounded-2xl bg-black/50 border flex items-center justify-center text-2xl shrink-0 ${item.isOpen ? 'border-white/5 text-white/40' : 'border-red-600 text-red-500'}`}>
-                 <i className={`fas ${
-                   item.type === 'WORK' ? 'fa-briefcase' : 
-                   item.type === 'FOOD' ? 'fa-utensils' : 
-                   item.type === 'SHOP' ? 'fa-shopping-cart' : 'fa-map-marker-alt'
-                 }`}></i>
+              <div className={`w-16 h-16 rounded-2xl bg-black border flex items-center justify-center text-2xl shrink-0 ${item.isOpen ? 'border-blue-500/50 text-blue-500' : 'border-red-600 text-red-500 animate-pulse'}`}>
+                 <i className={`fas ${item.type === 'CITY' ? 'fa-city' : (item.type === 'FOOD' ? 'fa-utensils' : 'fa-map-marker-alt')}`}></i>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-1">
-                   <p className="text-xl font-black text-white truncate italic uppercase leading-none">{item.name}</p>
-                   <span className={`text-[9px] font-black px-3 py-1 rounded-full ${item.isOpen ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-600 text-white'}`}>
-                      {item.isOpen ? 'ABERTO' : 'FECHADO'}
+                <div className="flex items-center justify-between mb-2">
+                   <p className="text-xl font-black text-white truncate leading-none uppercase">{item.name}</p>
+                   <span className={`text-[9px] font-black px-3 py-1 rounded-full ${item.isOpen ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20' : 'bg-red-600 text-white'}`}>
+                      {item.isOpen ? 'VETOR LIVRE' : 'BLOQUEADO'}
                    </span>
                 </div>
                 <p className="text-[10px] text-white/30 truncate font-bold uppercase tracking-widest">{item.address}</p>
-                <p className={`text-[9px] font-black mt-2 ${item.isOpen ? 'text-white/20' : 'text-red-400 animate-pulse'}`}>
-                  {item.hours}
-                </p>
               </div>
             </button>
           ))}

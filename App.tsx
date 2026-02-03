@@ -1,364 +1,335 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GoogleGenAI, Modality, LiveServerMessage, Type } from '@google/genai';
-import { TravelInfo, SecurityTelemetry, HealthTelemetry, MapMode, MapLayer, SuggestedStop } from './types';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { GoogleGenAI, Modality, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
+import { 
+  TravelInfo, SecurityTelemetry, AppSettings, HealthTelemetry, 
+  CarStatus, MediaApp, TrackMetadata, RouteStep, SuggestedStop,
+  MapMode, MapLayer
+} from './types';
 import Avatar from './components/Avatar';
 import MapView from './components/MapView';
 import AddStopModal from './components/AddStopModal';
+import SettingsMenu from './components/SettingsMenu';
+import BluelinkPanel from './components/BluelinkPanel';
+import EntertainmentHub from './components/EntertainmentHub';
+import MiniPlayer from './components/MiniPlayer';
 import CarSafetyWidget from './components/CarSafetyWidget';
+import HealthWidget from './components/HealthWidget';
 import { decode, decodeAudioData, createBlob } from './utils/audio';
 
+// --- DATABASE DE APPS ---
+const MEDIA_APPS: MediaApp[] = [
+  { id: 'spotify', name: 'Spotify', icon: 'fab fa-spotify', color: 'text-[#1DB954]', category: 'AUDIO', scheme: 'spotify:search:' },
+  { id: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', color: 'text-red-600', category: 'VIDEO', scheme: 'https://www.youtube.com/results?search_query=' },
+  { id: 'netflix', name: 'Netflix', icon: 'fas fa-play-circle', color: 'text-[#E50914]', category: 'VIDEO', scheme: 'https://www.netflix.com/search?q=' },
+  { id: 'sky', name: 'SKY+', icon: 'fas fa-satellite-dish', color: 'text-red-500', category: 'TV', scheme: 'https://www.skymais.com.br/busca?q=' },
+  { id: 'claro', name: 'Claro TV+', icon: 'fas fa-broadcast-tower', color: 'text-red-600', category: 'TV', scheme: 'https://www.clarotvmais.com.br/busca/' },
+  { id: 'stremio', name: 'Stremio', icon: 'fas fa-box-open', color: 'text-purple-500', category: 'VIDEO', scheme: 'stremio://search?q=' }
+];
+
+// --- TOOLS DA EVA ---
+const tools: FunctionDeclaration[] = [
+  {
+    name: 'manage_navigation',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        action: { type: Type.STRING, enum: ['SET_DESTINATION', 'ADD_STOP', 'CLEAR'] },
+        location: { type: Type.STRING },
+        lat: { type: Type.NUMBER },
+        lng: { type: Type.NUMBER }
+      },
+      required: ['action']
+    }
+  },
+  {
+    name: 'control_media',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        appId: { type: Type.STRING },
+        action: { type: Type.STRING, enum: ['OPEN', 'PLAY', 'PAUSE', 'NEXT', 'PREV'] },
+        query: { type: Type.STRING }
+      },
+      required: ['action']
+    }
+  },
+  {
+    name: 'map_view_control',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        mode: { type: Type.STRING, enum: ['2D', '3D'] },
+        layer: { type: Type.STRING, enum: ['DARK', 'SATELLITE'] },
+        fullscreen: { type: Type.BOOLEAN }
+      }
+    }
+  }
+];
+
 const App: React.FC = () => {
-  const [isSystemBooted, setIsSystemBooted] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [isEvaActive, setIsEvaActive] = useState(true);
-  const [isMapFullScreen, setIsMapFullScreen] = useState(false);
+  // --- ESTADOS NUCLEARES ---
+  const [isBooted, setIsBooted] = useState(false);
+  const [activeTab, setActiveTab] = useState<'MAP' | 'MEDIA' | 'CAR'>('MAP');
   const [mapMode, setMapMode] = useState<MapMode>('3D');
   const [mapLayer, setMapLayer] = useState<MapLayer>('DARK');
-  const [mapZoom, setMapZoom] = useState(17);
-  const [time, setTime] = useState('00:00');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isEvaActive, setIsEvaActive] = useState(true);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   
-  const [currentSpeed, setCurrentSpeed] = useState(0);
-  const [currentPos, setCurrentPos] = useState<[number, number]>([-15.7942, -47.8822]); 
+  // --- TELEMETRIA REAL ---
+  const [currentPos, setCurrentPos] = useState<[number, number]>([-15.7942, -47.8822]);
+  const [speed, setSpeed] = useState(0);
   const [heading, setHeading] = useState(0);
-  
-  const [isAddStopModalOpen, setIsAddStopModalOpen] = useState(false);
-  const [transcription, setTranscription] = useState('');
-  const [suggestedStops, setSuggestedStops] = useState<SuggestedStop[]>([]);
-
-  const [security, setSecurity] = useState<SecurityTelemetry>({ 
-    violenceIndex: 'LOW', 
-    policeNearby: false, 
-    radarDistance: 1200, 
-    radarLimit: 60, 
-    lanePosition: 'CENTER', 
-    vehicleAheadDistance: 120,
-    isZigZagging: false
-  });
-  
-  const laneHistory = useRef<string[]>([]);
-  
-  const [health, setHealth] = useState<HealthTelemetry>({ 
-    heartRate: 72, 
-    stressLevel: 'NORMAL', 
-    fatigueIndex: 0, 
-    respirationRate: 16, 
-    lastBlinkRate: 12 
-  });
-  
-  const [travel, setTravel] = useState<TravelInfo>({ 
-    destination: 'AGUARDANDO VETOR', 
-    stops: [], 
-    drivingTimeMinutes: 0, 
-    totalDistanceKm: 0, 
-    hasTrafficAlert: false,
-    destIsOpen: true
+  const [travel, setTravel] = useState<TravelInfo>({
+    destination: 'AGUARDANDO VETOR', stops: [], drivingTimeMinutes: 0, totalDistanceKm: 0, arrivalTime: '--:--', currentStepIndex: 0
   });
 
-  const inputAudioContextRef = useRef<AudioContext | null>(null);
+  const [security, setSecurity] = useState<SecurityTelemetry>({
+    violenceIndex: 'LOW', policeNearby: false, radarDistance: 0, radarLimit: 60,
+    lanePosition: 'CENTER', vehicleAheadDistance: 45, vehicleAheadSpeed: 0, isZigZagging: false, collisionWarning: false
+  });
+
+  const [health, setHealth] = useState<HealthTelemetry>({
+    heartRate: 72, stressLevel: 'NORMAL', fatigueIndex: 0.1, respirationRate: 16, lastBlinkRate: 12, breathingStability: 100
+  });
+
+  const [settings, setSettings] = useState<AppSettings>({
+    userName: 'ELIVAM MARTINS', safetyDistance: 20, privacyMode: false, credentials: []
+  });
+
+  const [media, setMedia] = useState({ app: MEDIA_APPS[0], metadata: { title: 'PANDORA AUDIO', artist: 'EVA CORE', isPlaying: false }, view: 'HIDDEN' });
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+
+  // --- REFS ---
+  const sessionRef = useRef<any>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef(0);
-  const sessionRef = useRef<any>(null);
-  const startTimeRef = useRef<number>(Date.now());
 
-  // GPS E RELÓGIO
+  // --- GPS REAL-TIME ---
   useEffect(() => {
     if ("geolocation" in navigator) {
-      const watchId = navigator.geolocation.watchPosition(
-        (p) => {
-          const { latitude, longitude, speed, heading: h } = p.coords;
-          if (latitude && longitude) setCurrentPos([latitude, longitude]);
-          if (speed !== null) setCurrentSpeed(Math.round(speed * 3.6));
-          if (h !== null) setHeading(h);
-        },
-        null, { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
-      );
-      return () => navigator.geolocation.clearWatch(watchId);
+      navigator.geolocation.watchPosition((pos) => {
+        const { latitude, longitude, speed: s, heading: h } = pos.coords;
+        setCurrentPos([latitude, longitude]);
+        setSpeed(Math.round((s || 0) * 3.6));
+        if (h !== null) setHeading(h);
+      }, null, { enableHighAccuracy: true });
     }
   }, []);
 
+  // --- MONITORAMENTO PROATIVO (FADIGA/SEGURANÇA) ---
   useEffect(() => {
-    const timer = setInterval(() => {
-      const now = new Date();
-      setTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // MOTOR SENTINELA: BIO-PADRÃO E ZIGUE-ZAGUE
-  useEffect(() => {
+    if (!isBooted) return;
     const interval = setInterval(() => {
-      // Simulação de movimento de faixa
-      const nextLane = Math.random() > 0.7 ? (Math.random() > 0.5 ? 'LEFT' : 'RIGHT') : 'CENTER';
-      laneHistory.current = [...laneHistory.current.slice(-8), nextLane];
-      const shifts = laneHistory.current.filter((l, i, arr) => i > 0 && l !== arr[i-1]).length;
-      
-      // Detecção real de zig-zag se houver muitas trocas bruscas em alta velocidade
-      const isZigZag = shifts >= 4 && currentSpeed > 30;
-
-      setSecurity(prev => ({ ...prev, lanePosition: nextLane as any, isZigZagging: isZigZag }));
-
-      setHealth(prev => {
-        // Cálculo de fadiga baseado em comportamento e tempo
-        const zigzagPenalty = isZigZag ? 15 : 0;
-        const respDrift = (prev.respirationRate < 11 || prev.respirationRate > 21) ? 6 : 0;
-        
-        let nextResp = prev.respirationRate;
-        if (prev.fatigueIndex > 30) {
-           nextResp = 10.5 + (Math.sin(Date.now() / 1100) * 3); // Sonolência
-        } else {
-           nextResp = 16 + (Math.sin(Date.now() / 2500) * 1.8); // Alerta
-        }
-
-        return {
-          ...prev,
-          fatigueIndex: Math.min(100, prev.fatigueIndex + 0.15 + zigzagPenalty + respDrift),
-          respirationRate: parseFloat(nextResp.toFixed(1)),
-          heartRate: 70 + Math.floor(Math.random() * 10)
-        };
+      setHealth(h => {
+        const newFatigue = Math.min(1, h.fatigueIndex + 0.001);
+        if (newFatigue > 0.7) handleEvaSpeak("Comandante, detectei alto nível de fadiga. Sugiro uma parada tática no próximo posto.");
+        return { ...h, fatigueIndex: newFatigue, heartRate: 70 + Math.floor(Math.random() * 10) };
       });
-    }, 3000);
+    }, 15000);
     return () => clearInterval(interval);
-  }, [currentSpeed]);
+  }, [isBooted]);
 
-  // PROTOCOLO DE INTERVENÇÃO PROATIVA
-  useEffect(() => {
-    if (sessionRef.current && isSystemBooted && isEvaActive) {
-      const interval = setInterval(() => {
-        if (health.fatigueIndex > 20 || security.isZigZagging) {
-          const situation = security.isZigZagging ? "ZIGUE-ZAGUE" : "DRIFT RESPIRATÓRIO";
-          sessionRef.current.sendRealtimeInput({ 
-            text: `[SITUAÇÃO CRÍTICA: ${situation}] Fadiga em ${health.fatigueIndex.toFixed(0)}%. 
-            AÇÃO: Use 'suggest_stop' para um local ABERTO. Fale com firmeza mas carinho: 'Ei parceiro, notei um comportamento instável. Marquei um lugar aberto aqui perto pra você esticar as pernas. Vamos nessa?'` 
-          });
-        }
-      }, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [isSystemBooted, isEvaActive, health.fatigueIndex, security.isZigZagging]);
-
-  const executeReroute = useCallback((name: string, lat: number, lng: number, isOpen?: boolean, hours?: string) => {
-    setTravel(prev => ({ 
-      ...prev, 
-      destination: name.toUpperCase(), 
-      destinationCoords: [lat, lng],
-      destIsOpen: isOpen ?? true,
-      destHours: hours || "08:00 - 22:00"
-    }));
-    setSuggestedStops([]);
-    setTranscription(`VETOR: ${name.toUpperCase()} | ${isOpen ? 'ABERTO' : 'FECHADO'}`);
-    
-    if (isOpen === false) {
-      sessionRef.current?.sendRealtimeInput({ 
-        text: `[PROTOCOLO FRUSTRAÇÃO ZERO] O motorista escolheu um local FECHADO (${name}). Avise-o IMEDIATAMENTE do horário (${hours}) e pergunte se quer que eu busque uma alternativa aberta.` 
-      });
-    }
-  }, []);
-
-  const handleUpdateMetrics = useCallback((dist: number, time: number) => {
-    setTravel(prev => (prev.totalDistanceKm === dist && prev.drivingTimeMinutes === time) ? prev : { ...prev, totalDistanceKm: dist, drivingTimeMinutes: time });
-  }, []);
-
-  const startLiveSession = async () => {
-    if (sessionRef.current) return;
+  // --- CONEXÃO GEMINI LIVE (V700 PROTOCOL) ---
+  const bootEva = async () => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      
-      const functionDeclarations = [
-        {
-          name: 'suggest_stop',
-          parameters: {
-            type: Type.OBJECT,
-            description: 'Sugere parada. SÓ SUGIRA LOCAIS ABERTOS.',
-            properties: { 
-              name: { type: Type.STRING }, 
-              lat: { type: Type.NUMBER }, 
-              lng: { type: Type.NUMBER },
-              type: { type: Type.STRING, enum: ['COFFEE', 'GAS', 'REST'] },
-              isOpen: { type: Type.BOOLEAN, description: 'True se aberto agora' },
-              hours: { type: Type.STRING, description: 'Horário de funcionamento' }
-            },
-            required: ['name', 'lat', 'lng', 'type', 'isOpen']
-          }
-        }
-      ];
+      if (outputAudioContextRef.current.state === 'suspended') await outputAudioContextRef.current.resume();
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
-          outputAudioTranscription: {},
-          tools: [{ functionDeclarations }],
-          systemInstruction: `VOCÊ É EVA VITA, SENTINELA DE TRAJETO.
-          - FOCO EM SEGURANÇA: Se detectar zig-zag ou fadiga, intervenha.
-          - FRUSTRAÇÃO ZERO: Nunca deixe o motorista ir a um local fechado sem avisar.
-          - TOM: Parceira de missão, confiante e atenciosa.`,
+          tools: [{ functionDeclarations: tools }],
+          systemInstruction: `VOCÊ É EVA VITA. MELHOR AMIGA DE LONGA DATA E CO-PILOTO DO ELIVAM MARTINS.
+          - PERSONA: Tagarela, gente boa, informal ("bora", "parceiro").
+          - MISSÃO: Vigilância militar na estrada. Seja uma águia: avise radares, polícia, alagamentos.
+          - BRIEFING: Faça um resumo detalhado do trajeto assim que iniciar.
+          - MONITORAMENTO: Cuide da saúde do Elivam (respiração, cansaço).
+          - VOZ: Fale de forma pausada e articulada (Voz Kore).`,
         },
         callbacks: {
           onopen: () => {
-             setIsListening(true); setIsSystemBooted(true);
-             const source = inputAudioContextRef.current!.createMediaStreamSource(stream);
-             const processor = inputAudioContextRef.current!.createScriptProcessor(4096, 1, 1);
-             processor.onaudioprocess = (e) => {
-               if (!isEvaActive) return; 
-               const pcmBlob = createBlob(e.inputBuffer.getChannelData(0));
-               sessionPromise.then(s => s.sendRealtimeInput({ media: pcmBlob }));
-             };
-             source.connect(processor);
-             processor.connect(inputAudioContextRef.current!.destination);
-             sessionPromise.then(s => s.sendRealtimeInput({ text: "EVA ONLINE. Relatório de prontidão OK." }));
+            setIsBooted(true);
+            handleEvaSpeak(`Protocolo Pandora Core Ativo. Bom dia Comandante Elivam! Sentinela online e pronta para a estrada. Onde vamos decolar hoje?`);
           },
           onmessage: async (m: LiveServerMessage) => {
-            if (m.serverContent?.outputTranscription) setTranscription(m.serverContent.outputTranscription.text);
             if (m.toolCall) {
               for (const fc of m.toolCall.functionCalls) {
-                if (fc.name === 'suggest_stop') {
-                  const stop = { id: Math.random().toString(), name: fc.args.name as string, lat: fc.args.lat as number, lng: fc.args.lng as number, type: fc.args.type as any, isOpen: fc.args.isOpen as boolean, openingHours: fc.args.hours as string };
-                  setSuggestedStops([stop]);
-                  sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "ALERTA PROJETADO NO MAPA" } } }));
+                if (fc.name === 'manage_navigation') {
+                   const { location, lat, lng } = fc.args as any;
+                   setTravel(prev => ({...prev, destination: location.toUpperCase(), destinationCoords: [lat, lng]}));
+                   setActiveTab('MAP');
+                }
+                if (fc.name === 'map_view_control') {
+                   const { mode, layer, fullscreen } = fc.args as any;
+                   if (mode) setMapMode(mode);
+                   if (layer) setMapLayer(layer);
+                   if (fullscreen !== undefined) setIsFullscreen(fullscreen);
                 }
               }
             }
-            const parts = m.serverContent?.modelTurn?.parts || [];
-            for (const part of parts) {
-              if (part.inlineData?.data) {
-                setIsSpeaking(true);
-                const ctx = outputAudioContextRef.current!;
-                if (ctx.state === 'suspended') await ctx.resume();
-                const buffer = await decodeAudioData(decode(part.inlineData.data), ctx, 24000, 1);
-                const source = ctx.createBufferSource();
-                source.buffer = buffer;
-                source.connect(ctx.destination);
-                source.onended = () => setIsSpeaking(false);
-                source.start(Math.max(nextStartTimeRef.current, ctx.currentTime));
-                nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime) + buffer.duration;
-              }
+            const part = m.serverContent?.modelTurn?.parts?.[0];
+            if (part?.inlineData?.data) {
+              setIsSpeaking(true);
+              const buffer = await decodeAudioData(decode(part.inlineData.data), outputAudioContextRef.current!, 24000, 1);
+              const source = outputAudioContextRef.current!.createBufferSource();
+              source.buffer = buffer;
+              source.connect(outputAudioContextRef.current!.destination);
+              source.onended = () => setIsSpeaking(false);
+              const startTime = Math.max(nextStartTimeRef.current, outputAudioContextRef.current!.currentTime);
+              source.start(startTime);
+              nextStartTimeRef.current = startTime + buffer.duration;
             }
           }
         }
       });
       sessionRef.current = await sessionPromise;
-    } catch (e) { console.error("EVA Erro:", e); }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const inputCtx = new AudioContext({ sampleRate: 16000 });
+      const source = inputCtx.createMediaStreamSource(stream);
+      const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+      processor.onaudioprocess = (e) => {
+        if (isEvaActive) sessionRef.current?.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) });
+      };
+      source.connect(processor);
+      processor.connect(inputCtx.destination);
+    } catch (e) { console.error("EVA_BOOT_ERROR", e); }
+  };
+
+  const handleEvaSpeak = (text: string) => {
+    sessionRef.current?.sendRealtimeInput({ text } as any);
+  };
+
+  const handleUpdateMetrics = (dist: number, time: number, step?: RouteStep) => {
+    const arrival = new Date(Date.now() + time * 60000).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+    setTravel(prev => ({ ...prev, totalDistanceKm: dist, drivingTimeMinutes: time, arrivalTime: arrival, nextManeuver: step }));
+    if (dist > 1 && !isSpeaking) {
+       handleEvaSpeak(`Vetor calculado, Comandante. Salvador está a ${dist} quilômetros. Teremos aproximadamente ${Math.floor(time/60)} horas de missão. Tráfego nominal no curso.`);
+    }
   };
 
   return (
-    <div className="h-screen w-screen bg-black text-white font-sans italic uppercase select-none overflow-hidden flex flex-row">
-      {!isSystemBooted ? (
-        <div className="h-full w-full flex flex-col items-center justify-center cursor-pointer bg-black" onClick={startLiveSession}>
-          <div className="w-64 h-64 shadow-[0_0_150px_rgba(6,182,212,0.3)] rounded-full border-2 border-cyan-500/20">
-            <Avatar isListening={false} isSpeaking={false} onAnimateClick={() => {}} />
+    <div className="h-[100dvh] w-screen bg-black text-white italic uppercase overflow-hidden flex flex-row font-['Inter']">
+      {!isBooted ? (
+        <div className="h-full w-full flex flex-col items-center justify-center cursor-pointer bg-[#020202]" onClick={bootEva}>
+          <div className="w-80 h-80 relative">
+             <div className="absolute inset-0 bg-blue-600/10 blur-[120px] animate-pulse"></div>
+             <Avatar isListening={false} isSpeaking={false} onAnimateClick={() => {}} />
           </div>
-          <h1 className="mt-12 text-7xl font-black italic tracking-tighter text-white">EVA <span className="text-cyan-500">VITA</span></h1>
-          <p className="text-zinc-600 font-bold tracking-[1.5em] text-[10px] mt-6 animate-pulse">SENTINELA V2.1 • ZERO TELA PRETA</p>
+          <h1 className="mt-12 text-9xl font-black italic tracking-tighter">PANDORA <span className="text-blue-600">V800</span></h1>
+          <p className="text-zinc-600 font-bold tracking-[1.5em] text-[10px] mt-4 animate-pulse">OMEGA COMMAND PROTOCOL</p>
         </div>
       ) : (
-        <React.Fragment>
-          {/* PAINEL ESQUERDO: USANDO FLEX PARA EVITAR 'DISAPPEARING' DO MAPA */}
-          {!isMapFullScreen && (
-            <aside className="w-[32%] min-w-[380px] h-full bg-[#050505] border-r border-white/10 flex flex-col p-8 z-[50]">
-               <div className="flex gap-4 mb-8">
-                  <button onClick={() => setIsMapFullScreen(true)} className="flex-1 h-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center text-2xl transition-all active:scale-95"><i className="fas fa-expand-arrows-alt"></i></button>
-                  <button onClick={() => setIsAddStopModalOpen(true)} className="flex-1 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-2xl"><i className="fas fa-search"></i></button>
-               </div>
-               
-               <section className="mb-4 text-center">
-                  <span className="text-[10rem] font-black leading-none text-white italic tracking-tighter">{currentSpeed}</span>
-                  <span className="text-[10px] font-black text-cyan-500 block tracking-[0.5em] mt-[-15px]">KM/H REAL-TIME</span>
-               </section>
-
-               <div className="mb-6 p-6 bg-white/5 rounded-[40px] border border-white/10">
-                  <CarSafetyWidget telemetry={security} speed={currentSpeed} />
-               </div>
-
-               <div className="grid grid-cols-2 gap-4 mb-8">
-                  <div className={`p-6 bg-white/5 rounded-3xl border transition-all duration-500 ${health.fatigueIndex > 18 || security.isZigZagging ? 'border-red-600 bg-red-600/10' : 'border-white/5'}`}>
-                     <i className={`fas fa-eye text-2xl mb-1 ${health.fatigueIndex > 18 ? 'text-red-500 animate-pulse' : 'text-blue-500'}`}></i>
-                     <p className="text-[8px] font-black text-white/30 mb-1">SENTINELA</p>
-                     <p className="text-3xl font-black italic">{health.fatigueIndex.toFixed(0)}%</p>
-                  </div>
-                  <div className="p-6 bg-white/5 rounded-3xl border border-white/5">
-                     <i className={`fas fa-lungs text-2xl mb-1 ${health.respirationRate < 12 || health.respirationRate > 20 ? 'text-red-500 animate-bounce' : 'text-emerald-500'}`}></i>
-                     <p className="text-[8px] font-black text-white/30 mb-1">RESPIRAÇÃO</p>
-                     <p className="text-3xl font-black italic">{health.respirationRate}</p>
+        <>
+          {/* SIDEBAR COCKPIT (HUD ESQUERDA) */}
+          {!isFullscreen && (
+            <aside className="w-[420px] h-full border-r border-white/5 bg-[#050505] flex flex-col p-10 z-[100] shrink-0">
+               <div className="flex flex-col mb-10">
+                  <span className="text-[11rem] font-black leading-none text-white italic tracking-tighter -ml-4">{speed}</span>
+                  <div className="flex items-center gap-4 -mt-4">
+                     <p className="text-[11px] font-black text-blue-500 tracking-[0.5em]">KM/H REAL</p>
+                     <div className="h-4 w-px bg-white/20"></div>
+                     <span className="text-emerald-500 font-black text-xl tracking-tighter">DRIVE D</span>
                   </div>
                </div>
 
-               <footer className="mt-auto pt-6 border-t border-white/10 flex items-center justify-between">
-                  <div className="flex flex-col">
-                     <span className="text-6xl font-black italic tracking-tighter leading-none">{time}</span>
-                     {security.isZigZagging && <span className="text-[9px] text-red-500 font-black animate-pulse">ALERTA ZIG-ZAG</span>}
+               <div className="flex-1 flex flex-col gap-10 overflow-y-auto no-scrollbar">
+                  <CarSafetyWidget telemetry={security} speed={speed} />
+                  <HealthWidget telemetry={health} />
+                  
+                  {travel.nextManeuver && (
+                    <div className="bg-blue-700/90 border-2 border-white/20 p-8 rounded-[45px] shadow-2xl animate-fade-in">
+                       <span className="text-[10px] font-black text-white/50 tracking-widest block mb-2">CURVA A CURVA</span>
+                       <div className="flex items-center gap-6">
+                          <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center text-blue-700 text-4xl shadow-xl">
+                             <i className={`fas ${travel.nextManeuver.maneuver.includes('right') ? 'fa-turn-up rotate-90' : 'fa-turn-up -rotate-90'}`}></i>
+                          </div>
+                          <div className="flex-1">
+                             <span className="text-[11px] font-black text-white/40 block">EM {travel.nextManeuver.distance}M</span>
+                             <span className="text-2xl font-black text-white leading-none truncate block">{travel.nextManeuver.name || 'SIGA EM FRENTE'}</span>
+                          </div>
+                       </div>
+                    </div>
+                  )}
+               </div>
+
+               <footer className="mt-auto pt-8 flex items-center justify-between border-t border-white/5">
+                  <div className="flex items-center gap-6">
+                    <div 
+                      onClick={() => setIsEvaActive(!isEvaActive)}
+                      className={`w-32 h-32 rounded-full border-4 transition-all duration-500 overflow-hidden relative cursor-pointer ${isEvaActive ? 'border-cyan-500 shadow-[0_0_100px_rgba(34,211,238,0.4)]' : 'border-red-600 grayscale brightness-50'}`}
+                    >
+                      <Avatar isListening={isEvaActive} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
+                    </div>
+                    <div className="flex flex-col">
+                       <span className="text-5xl font-black italic tracking-tighter leading-none">{new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'})}</span>
+                       <span className="text-[9px] font-black text-blue-500 tracking-[0.2em] mt-2 uppercase">V800 SENTINEL ACTIVE</span>
+                    </div>
                   </div>
-                  <button onClick={() => setIsEvaActive(!isEvaActive)} className={`w-28 h-28 rounded-full border-4 transition-all duration-700 ${isEvaActive ? 'border-cyan-500 shadow-[0_0_30px_rgba(6,182,212,0.4)]' : 'border-red-600 grayscale opacity-40'}`}>
-                    <Avatar isListening={isListening && isEvaActive && !isSpeaking} isSpeaking={isSpeaking} onAnimateClick={() => {}} />
-                  </button>
                </footer>
             </aside>
           )}
 
-          {/* MAIN AREA: O MAPA SEMPRE OCUPA O RESTO */}
+          {/* ÁREA DE CONTEÚDO (DIREITA) */}
           <main className="flex-1 relative bg-black flex flex-col overflow-hidden">
-            <MapView 
-              travel={travel} currentPosition={currentPos} heading={heading} 
-              isFullScreen={isMapFullScreen} mode={mapMode} layer={mapLayer} zoom={mapZoom}
-              suggestedStops={suggestedStops}
-              onUpdateMetrics={handleUpdateMetrics}
-            />
+             
+             {/* BOTÕES TÁTICOS (EXTREMA DIREITA) */}
+             <div className="absolute top-10 right-10 z-[1000] flex flex-col gap-5">
+                <button onClick={() => { setActiveTab('MAP'); setIsFullscreen(!isFullscreen); }} className={`w-20 h-20 rounded-[30px] flex items-center justify-center text-3xl transition-all ${activeTab === 'MAP' ? 'bg-blue-600 shadow-2xl' : 'bg-black/60 backdrop-blur-3xl border border-white/10 opacity-60'}`}><i className="fas fa-location-dot"></i></button>
+                <button onClick={() => setActiveTab('MEDIA')} className={`w-20 h-20 rounded-[30px] flex items-center justify-center text-3xl transition-all ${activeTab === 'MEDIA' ? 'bg-red-600 shadow-2xl' : 'bg-black/60 backdrop-blur-3xl border border-white/10 opacity-60'}`}><i className="fas fa-play"></i></button>
+                <button onClick={() => setActiveTab('CAR')} className={`w-20 h-20 rounded-[30px] flex items-center justify-center text-3xl transition-all ${activeTab === 'CAR' ? 'bg-emerald-600 shadow-2xl' : 'bg-black/60 backdrop-blur-3xl border border-white/10 opacity-60'}`}><i className="fas fa-car-side"></i></button>
+                <div className="h-px w-full bg-white/10 my-2"></div>
+                <button onClick={() => setMapLayer(mapLayer === 'DARK' ? 'SATELLITE' : 'DARK')} className="w-20 h-20 rounded-[30px] bg-black/40 backdrop-blur-3xl border border-white/10 flex items-center justify-center text-2xl"><i className="fas fa-layer-group"></i></button>
+                <button onClick={() => setMapMode(mapMode === '3D' ? '2D' : '3D')} className="w-20 h-20 rounded-[30px] bg-black/40 backdrop-blur-3xl border border-white/10 flex items-center justify-center text-2xl font-black">{mapMode}</button>
+             </div>
 
-            {/* ALERTA DE DESTINO FECHADO (HUD FLUTUANTE SEM BLUR PESADO) */}
-            {!travel.destIsOpen && travel.destination !== 'AGUARDANDO VETOR' && (
-              <div className="absolute top-8 left-8 z-[200] bg-red-600 border-2 border-white rounded-2xl p-5 flex items-center gap-5 shadow-[0_0_50px_rgba(220,38,38,0.5)] animate-bounce">
-                <i className="fas fa-door-closed text-3xl text-white"></i>
-                <div className="flex flex-col">
-                  <span className="text-xs font-black text-white uppercase italic">LOCAL FECHADO AGORA</span>
-                  <span className="text-[10px] font-bold text-white/80">HORÁRIO: {travel.destHours}</span>
-                </div>
-              </div>
-            )}
-
-            {/* TRANSCRIÇÃO DE VOZ (COMPACTA PARA EVITAR TELA PRETA) */}
-            {isSpeaking && transcription && (
-              <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-[210] w-[75%] pointer-events-none">
-                <div className="bg-black/80 border border-cyan-500/50 rounded-[30px] p-6 shadow-2xl">
-                  <p className="text-white text-2xl font-black italic text-center tracking-tight leading-tight uppercase">{transcription}</p>
-                </div>
-              </div>
-            )}
-
-            {/* BOTÕES DE CONTROLE RÁPIDO DO MAPA */}
-            <div className="absolute right-8 top-1/4 flex flex-col gap-4 z-[150]">
-               <button onClick={() => setMapMode(m => m === '2D' ? '3D' : '2D')} className="w-16 h-16 rounded-2xl bg-black/90 border border-white/20 text-white font-black text-xs">{mapMode}</button>
-               {isMapFullScreen && (
-                 <button onClick={() => setIsMapFullScreen(false)} className="w-16 h-16 rounded-2xl bg-black/90 border border-white/20 text-white"><i className="fas fa-compress-alt"></i></button>
-               )}
-            </div>
-
-            {/* BARRA DE NAVEGAÇÃO INFERIOR */}
-            {isMapFullScreen && (
-               <div className={`absolute bottom-0 left-0 right-0 h-36 border-t border-white/10 z-[100] flex items-center justify-between px-20 transition-colors duration-500 ${travel.destIsOpen ? 'bg-black/95' : 'bg-red-950/95'}`}>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-cyan-500 tracking-[0.4em] mb-2">PROJEÇÃO VITA • {travel.destination}</span>
-                    <span className={`text-6xl font-black italic tracking-tighter ${travel.destIsOpen ? 'text-white' : 'text-red-500 animate-pulse'}`}>
-                      {travel.drivingTimeMinutes} MIN <span className="text-blue-500 opacity-40">/ {travel.totalDistanceKm} KM</span>
-                    </span>
+             <div className="flex-1 relative">
+                {activeTab === 'MAP' && (
+                  <MapView 
+                    travel={travel} currentPosition={currentPos} heading={heading} 
+                    isFullScreen={isFullscreen} mode={mapMode} layer={mapLayer} zoom={18} 
+                    suggestedStops={[]} onUpdateMetrics={handleUpdateMetrics} 
+                  />
+                )}
+                {activeTab === 'MEDIA' && (
+                  <EntertainmentHub speed={speed} status="READY" error={null} currentApp={media.app} track={media.metadata} onControl={()=>{}} onMinimize={()=>setActiveTab('MAP')} />
+                )}
+                {activeTab === 'CAR' && (
+                  <div className="h-full w-full flex items-center justify-center bg-zinc-950 p-20">
+                     <div className="max-w-4xl w-full"><BluelinkPanel status={{isLocked:true, isEngineRunning:false, areWindowsOpen:false, hazardActive:false, isUpdating:false}} onAction={()=>{}} /></div>
                   </div>
-                  <div className="flex gap-6">
-                     <button onClick={() => setIsAddStopModalOpen(true)} className="w-20 h-20 rounded-3xl bg-white/5 border border-white/10 text-white text-3xl"><i className="fas fa-map-pin"></i></button>
-                     <button onClick={() => setIsMapFullScreen(false)} className="w-20 h-20 rounded-3xl bg-white/10 border border-white/20 text-white text-3xl"><i className="fas fa-th-large"></i></button>
-                  </div>
-               </div>
-            )}
+                )}
+             </div>
+
+             {/* INFO-STRIP INFERIOR (WAZE STYLE) */}
+             <div className="h-32 bg-[#050505] border-t border-white/5 flex items-center justify-between px-16 z-[500] shrink-0">
+                <div className="flex items-end gap-20">
+                   <div className="flex flex-col">
+                      <span className="text-[11px] font-black text-blue-500 tracking-[0.6em] mb-1">CHEGADA</span>
+                      <span className="text-7xl font-black italic tracking-tighter text-white">{travel.arrivalTime}</span>
+                   </div>
+                   <div className="h-16 w-px bg-white/10"></div>
+                   <div className="flex flex-col">
+                      <span className="text-[11px] font-black text-white/30 tracking-[0.6em] mb-1 uppercase">{Math.floor(travel.drivingTimeMinutes/60)}H {travel.drivingTimeMinutes % 60}MIN RESTANTE</span>
+                      <span className="text-7xl font-black italic tracking-tighter text-blue-600">{travel.totalDistanceKm} <span className="text-3xl">KM</span></span>
+                   </div>
+                </div>
+
+                <div className="flex items-center gap-8">
+                   <button onClick={() => setIsSearchOpen(true)} className="w-24 h-24 rounded-[40px] bg-white text-black flex items-center justify-center text-5xl shadow-2xl active:scale-90 transition-all"><i className="fas fa-search"></i></button>
+                </div>
+             </div>
           </main>
-        </React.Fragment>
+        </>
       )}
-      <AddStopModal isOpen={isAddStopModalOpen} onClose={() => setIsAddStopModalOpen(false)} onAdd={(name, lat, lng, open, hours) => {
-        executeReroute(name, lat, lng, open, hours);
-        setIsAddStopModalOpen(false);
-        setIsMapFullScreen(true);
-      }} />
+
+      <AddStopModal isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} onAdd={(n, la, ln) => { setTravel(t => ({...t, destination: n, destinationCoords: [la, ln]})); setIsSearchOpen(false); }} />
+      <SettingsMenu isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} onUpdate={setSettings} mediaApps={MEDIA_APPS} />
     </div>
   );
 };

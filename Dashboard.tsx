@@ -1,6 +1,7 @@
 
 import React from 'react';
-import { TravelInfo, LocationData } from '../types';
+// Corrected import path from '../types' to './types'
+import { TravelInfo, LocationData } from './types';
 
 interface DashboardProps {
   travel: TravelInfo;

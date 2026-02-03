@@ -9,60 +9,40 @@ interface RecommendationCardProps {
 }
 
 const RecommendationCard: React.FC<RecommendationCardProps> = ({ stops, onSelect, onClose }) => {
-  const getIcon = (type: string) => {
-    switch (type) {
-      case 'GAS': return 'fa-gas-pump text-yellow-500';
-      case 'FOOD': return 'fa-utensils text-green-500';
-      case 'REST': return 'fa-bed text-purple-500';
-      case 'COFFEE': return 'fa-coffee text-orange-400';
-      default: return 'fa-map-marker-alt text-blue-500';
-    }
-  };
-
-  if (stops.length === 0) return null;
-
   return (
-    <div className="absolute inset-0 bg-black/90 z-20 flex flex-col p-6 animate-fade-in">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-3xl font-bold text-white flex items-center gap-3">
-          <i className="fas fa-search-location text-blue-500"></i>
-          Paradas Recomendadas
-        </h2>
-        <button 
-          onClick={onClose}
-          className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center text-2xl text-white hover:bg-gray-700"
-        >
-          <i className="fas fa-times"></i>
-        </button>
-      </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto pr-2">
-        {stops.map((stop, index) => (
-          <div 
-            key={index}
-            onClick={() => onSelect(stop)}
-            className="bg-[#1c1c1e] border border-gray-800 p-5 rounded-3xl flex items-center justify-between hover:bg-[#2c2c2e] transition-colors cursor-pointer active:scale-95"
-          >
-            <div className="flex items-center gap-5">
-              <div className="w-16 h-16 rounded-2xl bg-gray-900 flex items-center justify-center text-3xl">
-                <i className={`fas ${getIcon(stop.type)}`}></i>
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-white">{stop.name}</h3>
-                <div className="flex items-center gap-3 mt-1">
-                  <span className="text-blue-400 font-medium">{stop.distance}</span>
-                  <div className="flex items-center text-yellow-500 text-sm">
-                    <i className="fas fa-star mr-1"></i> {stop.rating}
-                  </div>
+    <div className="bg-black/98 backdrop-blur-3xl border-2 border-white/10 rounded-[50px] shadow-[0_0_100px_rgba(0,0,0,1)] p-10 flex flex-col gap-8 animate-scale-up">
+       <div className="flex justify-between items-center mb-2">
+          <div className="flex flex-col">
+            <span className="text-[11px] font-black text-blue-500 tracking-[0.5em]">OPÇÕES DE VETOR</span>
+            <h3 className="text-3xl font-black italic text-white uppercase tracking-tighter">Escolha o Destino</h3>
+          </div>
+          <button onClick={onClose} className="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center text-white/40 border border-white/10"><i className="fas fa-times"></i></button>
+       </div>
+       
+       <div className="flex flex-col gap-4">
+          {stops.map((stop, idx) => (
+            <button 
+              key={idx}
+              onClick={() => onSelect(stop)}
+              className="w-full p-8 bg-white/5 border border-white/5 rounded-[35px] flex items-center justify-between hover:bg-blue-600 hover:border-blue-400 transition-all group active:scale-95"
+            >
+              <div className="flex items-center gap-8">
+                <div className="w-16 h-16 rounded-3xl bg-black border border-white/10 flex items-center justify-center text-3xl text-white group-hover:scale-110 transition-transform">
+                   <i className={`fas ${stop.type === 'GAS' ? 'fa-gas-pump' : (stop.type === 'COFFEE' ? 'fa-coffee' : 'fa-utensils')}`}></i>
+                </div>
+                <div className="text-left">
+                  <p className="text-2xl font-black italic text-white leading-none mb-2">{stop.name}</p>
+                  <p className="text-[11px] font-bold text-white/40 tracking-[0.2em] group-hover:text-white/80 uppercase">{stop.distance} • {stop.rating} <i className="fas fa-star text-yellow-500"></i></p>
                 </div>
               </div>
-            </div>
-            <div className="text-gray-500 text-2xl">
-              <i className="fas fa-chevron-right"></i>
-            </div>
-          </div>
-        ))}
-      </div>
+              <div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-white/20 group-hover:border-white group-hover:text-white">
+                <i className="fas fa-chevron-right"></i>
+              </div>
+            </button>
+          ))}
+       </div>
+       
+       <p className="text-[10px] font-black text-blue-500/50 text-center tracking-[0.4em] uppercase mt-4">DIGA O NOME OU TOQUE NO HUD</p>
     </div>
   );
 };

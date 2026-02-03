@@ -2,9 +2,10 @@
 export interface HealthTelemetry {
   heartRate: number;
   stressLevel: 'CALM' | 'NORMAL' | 'HIGH' | 'CRITICAL';
-  fatigueIndex: number; // 0-100 (PERCLOS style)
+  fatigueIndex: number; 
   respirationRate: number;
   lastBlinkRate: number;
+  breathingStability: number;
 }
 
 export interface SuggestedStop {
@@ -12,9 +13,10 @@ export interface SuggestedStop {
   name: string;
   lat: number;
   lng: number;
-  type: 'COFFEE' | 'GAS' | 'REST';
+  type: 'COFFEE' | 'GAS' | 'REST' | 'FOOD';
   isOpen?: boolean;
   openingHours?: string;
+  distanceFromRoute?: string;
 }
 
 export interface SecurityTelemetry {
@@ -24,51 +26,28 @@ export interface SecurityTelemetry {
   radarLimit: number;
   lanePosition: 'LEFT' | 'CENTER' | 'RIGHT';
   vehicleAheadDistance: number;
-  isZigZagging?: boolean; 
+  vehicleAheadSpeed: number;
+  isZigZagging: boolean;
+  collisionWarning: boolean;
+}
+
+export interface RouteStep {
+  instruction: string;
+  distance: number;
+  name: string;
+  maneuver: string;
 }
 
 export interface TravelInfo {
   destination: string;
   destinationCoords?: [number, number];
-  stops: any[];
+  stops: SuggestedStop[];
   drivingTimeMinutes: number;
   totalDistanceKm: number;
-  hasTrafficAlert?: boolean;
-  destIsOpen?: boolean;
-  destHours?: string;
+  arrivalTime: string;
+  nextManeuver?: RouteStep;
+  currentStepIndex: number;
 }
-
-export type MapMode = '2D' | '3D';
-export type MapLayer = 'DARK' | 'SATELLITE' | 'HYBRID';
-
-export type CarAction = 'LOCK' | 'START' | 'UNLOCK' | 'STOP' | 'WINDOWS_DOWN' | 'WINDOWS_UP' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
-
-export interface CarStatus {
-  isLocked: boolean;
-  isEngineRunning: boolean;
-  areWindowsOpen: boolean;
-  hazardActive: boolean;
-  isUpdating: boolean;
-}
-
-export interface StopRecommendation {
-  name: string;
-  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | string;
-  distance: string;
-  rating: number;
-  isOpen?: boolean;
-  openingHours?: string;
-}
-
-export interface LocationData {
-  latitude: number;
-  longitude: number;
-  speed: number;
-  heading: number | null;
-}
-
-export type PrivacyMode = 'PRIVATE' | 'SHARED' | 'ANONYMOUS';
-export type VideoPlaybackMode = 'PICTURE_IN_PICTURE' | 'FULLSCREEN' | 'HIDDEN';
 
 export interface StreamingCredential {
   appId: string;
@@ -79,9 +58,9 @@ export interface StreamingCredential {
 
 export interface AppSettings {
   userName: string;
-  credentials?: StreamingCredential[];
-  privacyMode?: PrivacyMode;
-  playbackMode?: VideoPlaybackMode;
+  safetyDistance: number; // Padrão 20m
+  privacyMode: boolean;
+  credentials: StreamingCredential[];
 }
 
 export interface MediaApp {
@@ -90,23 +69,57 @@ export interface MediaApp {
   icon: string;
   color: string;
   category: 'AUDIO' | 'VIDEO' | 'TV';
+  scheme: string;
 }
+
+export interface CarStatus {
+  isLocked: boolean;
+  isEngineRunning: boolean;
+  areWindowsOpen: boolean;
+  hazardActive: boolean;
+  isUpdating: boolean;
+}
+
+export type CarAction = 'LOCK' | 'START' | 'UNLOCK' | 'STOP' | 'WINDOWS_DOWN' | 'WINDOWS_UP' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
 
 export interface TrackMetadata {
   title: string;
   artist: string;
   isPlaying: boolean;
-  albumArt?: string;
-  duration?: number;
-  currentTime?: number;
   season?: number;
   episode?: number;
+  sourceApp?: string;
 }
 
+// Added missing exports for component integrations
+export interface LocationData {
+  latitude: number;
+  longitude: number;
+  speed?: number;
+  heading?: number;
+}
+
+export interface StopRecommendation {
+  name: string;
+  type: 'GAS' | 'COFFEE' | 'FOOD' | 'REST';
+  distance: string;
+  rating: number;
+  lat: number;
+  lng: number;
+}
+
+export type PrivacyMode = 'PRIVATE' | 'SHARED' | 'ANONYMOUS';
+
+export type VideoPlaybackMode = 'SAFETY' | 'ALWAYS_ON' | 'VOICE_ONLY';
+
 export interface MeetingInfo {
-  id: string;
   title: string;
   startTime: string;
-  duration: string;
-  participants: string[];
+  endTime?: string;
+  organizer?: string;
+  platform?: 'TEAMS' | 'ZOOM' | 'MEET';
 }
+
+export type MapMode = '2D' | '3D';
+
+export type MapLayer = 'DARK' | 'LIGHT' | 'SATELLITE' | 'HYBRID';

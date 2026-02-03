@@ -4,9 +4,13 @@
     "microphone",
     "geolocation"
   ],
-  "name": "EVA PANDORA V160",
-  "short_name": "EVA CORE",
-  "description": "Sentinela de Trajeto e Co-Piloto Inteligente PANDORA V160",
+  "name": "PANDORA COMMANDER",
+  "short_name": "EVA V200",
+  "description": "Navegação Inteligente e Co-Piloto PANDORA CORE",
   "theme_color": "#000000",
-  "background_color": "#000000"
+  "background_color": "#000000",
+  "categories": [
+    "navigation",
+    "transportation"
+  ]
 }
