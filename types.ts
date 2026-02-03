@@ -6,21 +6,20 @@ export interface LocationData {
   heading: number | null;
 }
 
-export type MapMode = '2D' | '3D' | 'SATELLITE' | 'STREET';
+export type MapMode = '2D' | '3D';
 export type MapLayer = 'DARK' | 'SATELLITE' | 'HYBRID';
+
+export interface LaneGuidance {
+  totalLanes: number;
+  activeLanes: number[];
+  direction: 'LEFT' | 'RIGHT' | 'STRAIGHT';
+}
 
 export interface RouteStep {
   instruction: string;
   distance: number;
   type: string;
-}
-
-export interface WeatherTelemetry {
-  temp: number;
-  condition: string;
-  floodRisk: 'LOW' | 'MEDIUM' | 'HIGH';
-  precipProb: number;
-  alertTitle?: string;
+  lanes?: LaneGuidance;
 }
 
 export interface SecurityTelemetry {
@@ -32,14 +31,6 @@ export interface SecurityTelemetry {
   vehicleAheadDistance: number;
 }
 
-export interface CarTelemetry {
-  fuelLevel: number; 
-  autonomyKm: number;
-  odometer: number;
-  isFuelLow: boolean;
-  model: string;
-}
-
 export interface TravelInfo {
   destination: string;
   destinationCoords?: [number, number];
@@ -47,15 +38,7 @@ export interface TravelInfo {
   drivingTimeMinutes: number;
   totalDistanceKm: number;
   nextStep?: RouteStep;
-}
-
-export interface TrackMetadata {
-  title: string;
-  artist: string;
-  isPlaying: boolean;
-  progress: number;
-  season?: number | string;
-  episode?: number | string;
+  hasTrafficAlert?: boolean;
 }
 
 export interface MediaApp {
@@ -67,16 +50,15 @@ export interface MediaApp {
   scheme: string;
 }
 
-// Fix: Added missing types for video playback and privacy modes
+// Added missing types for AppSettings and media components
 export type VideoPlaybackMode = 'PIP' | 'FULL';
 export type PrivacyMode = 'GHOST' | 'RESTRICTED' | 'TOTAL';
 
-// Fix: Added missing interface for streaming credentials
 export interface StreamingCredential {
   appId: string;
   user: string;
   pass: string;
-  profileName: string;
+  profileName?: string;
 }
 
 export interface AppSettings {
@@ -85,13 +67,7 @@ export interface AppSettings {
   safetyDistance: number;
   videoPlaybackMode: VideoPlaybackMode;
   privacyMode: PrivacyMode;
-  // Fix: Added credentials array to AppSettings
   credentials: StreamingCredential[];
-}
-
-export interface MeetingInfo {
-  title: string;
-  startTime: string;
 }
 
 export type CarAction = 'LOCK' | 'START' | 'UNLOCK' | 'STOP' | 'WINDOWS_DOWN' | 'WINDOWS_UP' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
@@ -104,10 +80,30 @@ export interface CarStatus {
   isUpdating: boolean;
 }
 
-// Fix: Added missing StopRecommendation interface
+// Added missing types for specialized components
 export interface StopRecommendation {
   name: string;
+  type: 'GAS' | 'FOOD' | 'REST' | 'COFFEE' | 'GENERAL';
   distance: string;
   rating: number;
-  type: string;
+  lat: number;
+  lng: number;
+}
+
+export interface TrackMetadata {
+  title: string;
+  artist: string;
+  albumArt?: string;
+  duration?: number;
+  isPlaying?: boolean;
+  season?: number;
+  episode?: number;
+}
+
+export interface MeetingInfo {
+  id: string;
+  title: string;
+  startTime: string;
+  organizer: string;
+  participantsCount: number;
 }
