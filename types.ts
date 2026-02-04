@@ -1,34 +1,113 @@
 
-export interface HealthTelemetry {
-  heartRate: number;
-  stressLevel: 'CALM' | 'NORMAL' | 'HIGH' | 'CRITICAL';
-  fatigueIndex: number; 
-  respirationRate: number;
-  lastBlinkRate: number;
-  breathingStability: number;
+export type RiskLevel = 'SAFE' | 'CAUTION' | 'DANGER' | 'CRITICAL';
+export type PandoraMood = 'IDLE' | 'LISTENING' | 'THINKING' | 'WARNING' | 'SUGGESTING';
+export type PrivacyMode = 'STEALTH' | 'PUBLIC' | 'PRIVATE';
+
+export interface SentinelStatus {
+  riskLevel: RiskLevel;
+  weather: string;
+  temperature: number;
+  violenceIndex: number;
+  floodRisk: boolean;
+  speedLimit: number;
 }
+
+export interface PandoraTravel {
+  destination: string;
+  eta: string;
+  distanceTotal: string;
+  nextStep: {
+    instruction: string;
+    distance: string;
+    maneuver: string;
+  } | null;
+}
+
+export interface PandoraMedia {
+  title: string;
+  artist: string;
+  cover: string;
+  isPlaying: boolean;
+  service: 'SPOTIFY' | 'YOUTUBE' | 'NETFLIX' | 'TV';
+  progress: number;
+}
+
+export interface AppState {
+  isBooted: boolean;
+  isInteractionView: boolean;
+  privacyMode: boolean;
+  mood: PandoraMood;
+  sentinel: SentinelStatus;
+  travel: PandoraTravel;
+  media: PandoraMedia;
+  userLocation: [number, number];
+  heading: number;
+  currentSpeed: number;
+}
+
+// Added missing types based on component usage
+export interface TravelInfo {
+  destination: string;
+  drivingTimeMinutes: number;
+  totalDistanceKm: number;
+  stops: { id: string; name: string }[];
+  destinationCoords?: [number, number];
+}
+
+export interface LocationData {
+  latitude: number;
+  longitude: number;
+}
+
+export interface StopRecommendation {
+  type: 'GAS' | 'COFFEE' | 'FOOD';
+  name: string;
+  distance: string;
+  rating: number;
+}
+
+export interface AppSettings {
+  userName: string;
+  credentials: StreamingCredential[];
+}
+
+export interface MediaApp {
+  id: string;
+  category: 'AUDIO' | 'VIDEO' | 'TV';
+  icon: string;
+  color: string;
+  name: string;
+}
+
+export interface StreamingCredential {
+  appId: string;
+  user: string;
+  pass: string;
+  profileName: string;
+}
+
+export type VideoPlaybackMode = 'FULLSCREEN' | 'PIP' | 'MINIMIZED';
+
+export interface TrackMetadata {
+  title: string;
+  artist: string;
+  isPlaying: boolean;
+  season?: number;
+  episode?: number;
+}
+
+export interface MeetingInfo {
+  title: string;
+  startTime: string;
+}
+
+export type MapMode = '2D' | '3D';
+export type MapLayer = 'SATELLITE' | 'STREET';
 
 export interface SuggestedStop {
   id: string;
   name: string;
-  lat: number;
-  lng: number;
-  type: 'COFFEE' | 'GAS' | 'REST' | 'FOOD';
-  isOpen?: boolean;
-  openingHours?: string;
-  distanceFromRoute?: string;
-}
-
-export interface SecurityTelemetry {
-  violenceIndex: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
-  policeNearby: boolean;
-  radarDistance: number;
-  radarLimit: number;
-  lanePosition: 'LEFT' | 'CENTER' | 'RIGHT';
-  vehicleAheadDistance: number;
-  vehicleAheadSpeed: number;
-  isZigZagging: boolean;
-  collisionWarning: boolean;
+  coords: [number, number];
 }
 
 export interface RouteStep {
@@ -38,39 +117,7 @@ export interface RouteStep {
   maneuver: string;
 }
 
-export interface TravelInfo {
-  destination: string;
-  destinationCoords?: [number, number];
-  stops: SuggestedStop[];
-  drivingTimeMinutes: number;
-  totalDistanceKm: number;
-  arrivalTime: string;
-  nextManeuver?: RouteStep;
-  currentStepIndex: number;
-}
-
-export interface StreamingCredential {
-  appId: string;
-  user: string;
-  pass: string;
-  profileName?: string;
-}
-
-export interface AppSettings {
-  userName: string;
-  safetyDistance: number; // Padrão 20m
-  privacyMode: boolean;
-  credentials: StreamingCredential[];
-}
-
-export interface MediaApp {
-  id: string;
-  name: string;
-  icon: string;
-  color: string;
-  category: 'AUDIO' | 'VIDEO' | 'TV';
-  scheme: string;
-}
+export type CarAction = 'LOCK' | 'START' | 'UNLOCK' | 'STOP' | 'WINDOWS_DOWN' | 'WINDOWS_UP' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
 
 export interface CarStatus {
   isLocked: boolean;
@@ -80,46 +127,14 @@ export interface CarStatus {
   isUpdating: boolean;
 }
 
-export type CarAction = 'LOCK' | 'START' | 'UNLOCK' | 'STOP' | 'WINDOWS_DOWN' | 'WINDOWS_UP' | 'HAZARD_LIGHTS' | 'HORN_LIGHTS';
-
-export interface TrackMetadata {
-  title: string;
-  artist: string;
-  isPlaying: boolean;
-  season?: number;
-  episode?: number;
-  sourceApp?: string;
+export interface SecurityTelemetry {
+  vehicleAheadDistance: number;
+  isZigZagging: boolean;
+  lanePosition: 'LEFT' | 'RIGHT' | 'CENTER';
 }
 
-// Added missing exports for component integrations
-export interface LocationData {
-  latitude: number;
-  longitude: number;
-  speed?: number;
-  heading?: number;
+export interface HealthTelemetry {
+  fatigueIndex: number;
+  heartRate: number;
+  lastBlinkRate: number;
 }
-
-export interface StopRecommendation {
-  name: string;
-  type: 'GAS' | 'COFFEE' | 'FOOD' | 'REST';
-  distance: string;
-  rating: number;
-  lat: number;
-  lng: number;
-}
-
-export type PrivacyMode = 'PRIVATE' | 'SHARED' | 'ANONYMOUS';
-
-export type VideoPlaybackMode = 'SAFETY' | 'ALWAYS_ON' | 'VOICE_ONLY';
-
-export interface MeetingInfo {
-  title: string;
-  startTime: string;
-  endTime?: string;
-  organizer?: string;
-  platform?: 'TEAMS' | 'ZOOM' | 'MEET';
-}
-
-export type MapMode = '2D' | '3D';
-
-export type MapLayer = 'DARK' | 'LIGHT' | 'SATELLITE' | 'HYBRID';

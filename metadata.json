@@ -4,13 +4,14 @@
     "microphone",
     "geolocation"
   ],
-  "name": "PANDORA COMMANDER",
-  "short_name": "EVA V200",
-  "description": "Navegação Inteligente e Co-Piloto PANDORA CORE",
+  "name": "PANDORA v1.0",
+  "short_name": "PANDORA",
+  "description": "Sentinela de Navegação Inteligente - Projeto Águia",
   "theme_color": "#000000",
   "background_color": "#000000",
   "categories": [
     "navigation",
-    "transportation"
+    "security",
+    "entertainment"
   ]
 }
