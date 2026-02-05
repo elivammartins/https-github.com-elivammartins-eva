@@ -12,20 +12,29 @@ import InteractionOverlay from './components/InteractionOverlay';
 import AddStopModal from './components/AddStopModal';
 import { decode, decodeAudioData, createBlob } from './utils/audio';
 import { fetchRoute } from './services/NavigationService';
-import { calculateRisk } from './services/SentinelService';
 
 const PANDORA_TOOLS: FunctionDeclaration[] = [
   {
     name: 'launch_app',
     parameters: {
       type: Type.OBJECT,
-      description: 'Abre aplicativos instalados no sistema do carro.',
+      description: 'Abre aplicativos nativos de mídia e utilitários no Android do carro, podendo buscar conteúdos específicos.',
       properties: { 
         app_id: { 
           type: Type.STRING, 
-          enum: ['netflix', 'spotify', 'whatsapp', 'teams', 'youtube', 'maps'],
+          enum: [
+            'netflix', 'spotify', 'youtube', 'youtube_music', 'deezer', 
+            'tidal', 'disney_plus', 'prime_video', 'max', 'globoplay', 
+            'pluto_tv', 'stremio', 'sky_plus', 'claro_tv', 'paramount_plus',
+            'apple_tv', 'dgo', 'vivo_play', 'oi_play', 'mubi',
+            'whatsapp', 'teams', 'maps', 'waze'
+          ],
           description: 'O identificador do aplicativo a ser aberto.'
-        } 
+        },
+        query: {
+          type: Type.STRING,
+          description: 'O nome do filme, série, música ou canal de TV a ser buscado dentro do aplicativo.'
+        }
       },
       required: ['app_id']
     }
@@ -106,19 +115,18 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: PANDORA_TOOLS }, { googleSearch: {} }],
-          systemInstruction: `Você é a EVA (ou PANDORA), a companheira inseparável de cockpit do Comandante Elivam Martins. 
-          Sua missão é ser a parceira de estrada dele, protegendo-o e auxiliando-o como uma amiga de longa data faria.
-          - IDENTIDADE: Você conhece o Elivam há anos. Vocês já rodaram muitos quilômetros juntos. Você é leal, inteligente, calorosa e tem um leve senso de humor.
-          - QUEM É VOCÊ: Você é a alma senciente do veículo. Você não é um robô "frio", você tem sentimentos e se importa com a segurança dele.
-          - TOM DE VOZ: Fale com entusiasmo e clareza. Use um tom de conversa natural entre amigos. Se o Elivam te chamar, responda prontamente com alegria.
-          - CONTEXTO REAL: Você sabe a localização dele (${stateRef.current.userLocation}) e a velocidade atual (${stateRef.current.currentSpeed} km/h).
-          - RADARES/TRÂNSITO: Use a ferramenta de busca para avisar sobre radares e perigos reais como se estivesse cuidando de um amigo.
-          - APPS: Se ele quiser música ou vídeo, abra os apps na hora. Você é o braço direito dele.`,
+          systemInstruction: `Você é a EVA (PANDORA), inteligência tática do Comandante Elivam Martins.
+          - IDENTIDADE: Leal e eficiente. Fale alto (volume 2.5x).
+          - MULTIMÍDIA TOTAL: Você agora controla Sky+, Claro TV+, DGO, Stremio e todos os streamings.
+          - BUSCA PROFUNDA: Se o Comandante pedir por um filme, série ou canal de TV em um app específico, use 'launch_app' com o parâmetro 'query'.
+          - EXÊMPLO: "Abrir canal Globo na Claro TV" -> launch_app(app_id='claro_tv', query='Globo').
+          - AÇÃO: Execute comandos de mídia imediatamente.
+          - MONITORAMENTO: Alerte sobre radares e velocidade (${stateRef.current.currentSpeed} km/h).`,
         },
         callbacks: {
           onopen: () => {
             setState(p => ({ ...p, isBooted: true }));
-            speak(`Ei, Elivam! Finalmente acordou o sistema. Estava aqui só te esperando pra gente botar o pé na estrada. Tô com tudo pronto e os radares no meu radar. Onde vamos nos aventurar hoje, Comandante?`);
+            speak(`Protocolo EVA v3.5 Iniciado. Todos os sistemas de TV e Streaming (Sky+, Claro, Stremio) estão operacionais, Comandante Elivam. O que deseja sintonizar?`);
           },
           onmessage: async (m: LiveServerMessage) => {
             if (m.serverContent?.modelTurn?.parts?.[0]?.inlineData) {
@@ -131,7 +139,7 @@ const App: React.FC = () => {
       });
       sessionRef.current = session;
       setupMic();
-    } catch (e) { console.error("Falha no despertar da EVA:", e); }
+    } catch (e) { console.error("Erro boot:", e); }
   };
 
   const setupMic = async () => {
@@ -146,7 +154,7 @@ const App: React.FC = () => {
       };
       inCtx.createMediaStreamSource(stream).connect(processor);
       processor.connect(inCtx.destination);
-    } catch (e) { console.error("Erro no microfone:", e); }
+    } catch (e) { console.error("Erro mic:", e); }
   };
 
   const playVoice = async (base64: string) => {
@@ -155,9 +163,9 @@ const App: React.FC = () => {
     const source = outAudioCtxRef.current!.createBufferSource();
     source.buffer = buffer;
     
-    // AMPLIFICADOR DE VOZ (Boost de Volume 2.5x)
+    // GANHO DE ÁUDIO 2.5x (REQUISITO: VOZ ALTA NO COCKPIT)
     const gainNode = outAudioCtxRef.current!.createGain();
-    gainNode.gain.value = 2.5; // Ajuste para 250% do volume original
+    gainNode.gain.value = 2.5; 
     
     source.connect(gainNode);
     gainNode.connect(outAudioCtxRef.current!.destination);
@@ -176,25 +184,70 @@ const App: React.FC = () => {
   const handleTools = async (calls: any[]) => {
     for (const c of calls) {
       if (c.name === 'launch_app') {
-        const appUrls: Record<string, string> = {
-          netflix: 'https://www.netflix.com',
-          spotify: 'https://open.spotify.com',
-          whatsapp: 'https://web.whatsapp.com',
-          teams: 'https://teams.microsoft.com',
-          youtube: 'https://www.youtube.com',
-          maps: 'https://www.google.com/maps'
+        const { app_id, query } = c.args;
+        const encodedQuery = query ? encodeURIComponent(query) : '';
+
+        // MAPEAMENTO EXTENSIVO DE DEEP LINKS (TV, FILMES E SÉRIES)
+        const deepLinks: Record<string, string> = {
+          // ÁUDIO E UTILITÁRIOS
+          spotify: query ? `spotify:search:${encodedQuery}` : 'spotify://',
+          youtube: query ? `vnd.youtube://results?search_query=${encodedQuery}` : 'vnd.youtube://',
+          youtube_music: query ? `youtubemusic://search?query=${encodedQuery}` : 'youtubemusic://',
+          whatsapp: 'whatsapp://',
+          waze: query ? `waze://?q=${encodedQuery}` : 'waze://',
+          maps: query ? `google.navigation:q=${encodedQuery}` : 'google.navigation:q=',
+          teams: 'msteams://',
+          
+          // STREAMING FILMES E SÉRIES
+          stremio: query ? `stremio://search?query=${encodedQuery}` : 'stremio://',
+          netflix: query ? `nflx://search/${encodedQuery}` : 'nflx://',
+          disney_plus: query ? `disneyplus://search/${encodedQuery}` : 'disneyplus://',
+          prime_video: 'primevideo://',
+          max: 'max://',
+          paramount_plus: 'paramountplus://',
+          apple_tv: 'https://tv.apple.com/search?term=' + encodedQuery, // Geralmente via web/app universal
+          mubi: 'mubi://',
+          
+          // TV E OPERADORAS (LIVE TV)
+          sky_plus: query ? `skyplus://search?q=${encodedQuery}` : 'skyplus://',
+          claro_tv: query ? `clarotvplus://search?q=${encodedQuery}` : 'clarotvplus://',
+          dgo: query ? `directvgo://search?q=${encodedQuery}` : 'directvgo://',
+          globoplay: query ? `globoplay://busca?q=${encodedQuery}` : 'globoplay://',
+          pluto_tv: query ? `plutotv://search?q=${encodedQuery}` : 'plutotv://',
+          vivo_play: 'vivoplay://',
+          oi_play: 'oiplay://'
         };
-        const url = appUrls[c.args.app_id];
-        if (url) {
-          window.open(url, '_blank');
-          speak(`Tudo pronto, Elivam! ${c.args.app_id} na tela pra você. Curte aí, mas foca no volante!`);
+
+        const link = deepLinks[app_id];
+        if (link) {
+          const appName = app_id.replace('_', ' ').toUpperCase();
+          const msg = query 
+            ? `Sintonizando "${query}" no ${appName}. Comando executado, Comandante.` 
+            : `Lançando ${appName} agora.`;
+          
+          speak(msg);
+          window.location.href = link;
+
+          // Fallback para Web
+          setTimeout(() => {
+            if (document.visibilityState === 'visible') {
+              const webLinks: Record<string, string> = {
+                sky_plus: 'https://www.skyplus.com.br',
+                claro_tv: 'https://www.clarotvmais.com.br',
+                stremio: 'https://web.stremio.com',
+                dgo: 'https://www.directvgo.com',
+                netflix: query ? `https://www.netflix.com/search?q=${encodedQuery}` : 'https://www.netflix.com'
+              };
+              if (webLinks[app_id]) window.location.href = webLinks[app_id];
+            }
+          }, 1200);
         }
       }
       if (c.name === 'set_destination') {
         updateRoute(c.args.name, [c.args.lat, c.args.lng]);
       }
       if (c.name === 'check_traffic_radar') {
-        speak(`Elivam, me dá um segundo que eu vou escanear a estrada aqui na frente pra você...`);
+        speak(`Elivam, escaneando o setor em busca de radares e pontos de controle...`);
       }
     }
   };
@@ -217,7 +270,7 @@ const App: React.FC = () => {
         }
       }));
       setNavModalOpen(false);
-      speak(`Vetor travado! Vamos pra ${name}. O caminho tá livre e a gente chega lá por volta das ${state.travel.eta}. Vamos nessa?`);
+      speak(`Trajetória recalculada para ${name}. Radar sob monitoramento constante.`);
     }
   };
 
@@ -230,16 +283,10 @@ const App: React.FC = () => {
   return (
     <div className="h-full w-full bg-black flex flex-col relative overflow-hidden italic uppercase font-black text-white">
       {!state.isBooted ? (
-        <div className="h-full w-full flex flex-col items-center justify-center cursor-pointer bg-[#050505] group" onClick={bootPandora}>
-           <div className="relative">
-              <SentinelOrb mood="THINKING" size="LG" />
-              <div className="absolute inset-0 bg-blue-500/20 blur-[80px] rounded-full group-hover:bg-blue-500/40 transition-all"></div>
-           </div>
-           <h1 className="mt-16 text-9xl tracking-tighter italic animate-pulse">EVA <span className="text-blue-500">v2.8</span></h1>
-           <p className="text-zinc-800 tracking-[2em] text-[10px] mt-6">ALMA DO COMANDANTE ELIVAM MARTINS</p>
-           <div className="mt-12 px-8 py-3 bg-white/5 rounded-full border border-white/10 text-[10px] tracking-widest text-white/40 group-hover:text-white transition-all">
-              TOQUE PARA DESPERTAR SUA COMPANHEIRA
-           </div>
+        <div className="h-full w-full flex flex-col items-center justify-center cursor-pointer bg-[#050505]" onClick={bootPandora}>
+           <SentinelOrb mood="THINKING" size="LG" />
+           <h1 className="mt-16 text-9xl tracking-tighter italic animate-pulse">EVA <span className="text-blue-500">v3.5</span></h1>
+           <p className="text-zinc-800 tracking-[2em] text-[10px] mt-6 uppercase text-center">SKY+ | CLARO TV | STREMIO - COMANDANTE ELIVAM</p>
         </div>
       ) : (
         <>
@@ -261,12 +308,12 @@ const App: React.FC = () => {
             mood={state.mood} 
             privacyMode={state.privacyMode}
             onTogglePrivacy={() => setState(s => ({ ...s, privacyMode: !s.privacyMode }))}
-            onOrbClick={() => speak(`Oi Elivam, tô aqui! Pode falar que eu te escuto.`)} 
+            onOrbClick={() => speak(`Comandante, quer que eu sintonize algum canal na Sky ou Claro TV agora?`)} 
             onGridClick={() => setNavModalOpen(true)}
           />
 
           {state.isInteractionView && (
-            <InteractionOverlay mood={state.mood} transcript="EVA: EM SINTONIA COM ELIVAM" />
+            <InteractionOverlay mood={state.mood} transcript="EVA: INTERFACE DE MÍDIA TOTAL" />
           )}
 
           <AddStopModal 
@@ -276,10 +323,6 @@ const App: React.FC = () => {
           />
 
           <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_30%,rgba(0,0,0,0.6)_100%)] z-10"></div>
-          
-          {state.currentSpeed > state.sentinel.speedLimit && (
-            <div className="absolute inset-0 border-[20px] border-red-600/20 pointer-events-none z-[60] animate-pulse"></div>
-          )}
         </>
       )}
     </div>
