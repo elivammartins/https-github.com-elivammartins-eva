@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#000000">
-  <title>Pandora Core EVA</title>
+  <title>PANDORA UNLEASHED v5.0</title>
   
   <link rel="manifest" href="./manifest.json">
   <script src="https://cdn.tailwindcss.com"></script>
@@ -13,38 +13,44 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   
-  <script>
-    // Polyfill básico para evitar crash se process.env não estiver injetado no momento do parse
-    if (typeof window.process === 'undefined') {
-      window.process = { env: { API_KEY: '' } };
-    }
-  </script>
+  <!-- MSAL.js para Microsoft Graph REAL -->
+  <script type="text/javascript" src="https://alcdn.msauth.net/browser/2.35.0/js/msal-browser.min.js"></script>
+  <!-- Spotify SDK -->
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
 
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
     body, html { background-color: #000000; color: #ffffff; overflow: hidden; width: 100%; height: 100dvh; font-family: 'Inter', sans-serif; }
     #root { width: 100%; height: 100%; display: flex; flex-direction: column; }
     .no-scrollbar::-webkit-scrollbar { display: none; }
-    .leaflet-tile-pane { filter: saturate(1.2) contrast(1.1); }
-    .custom-scroll { scrollbar-width: none; -ms-overflow-style: none; }
-    .custom-scroll::-webkit-scrollbar { display: none; }
+    .leaflet-tile-pane { filter: saturate(1.2) contrast(1.1) brightness(0.6); }
     
-    @keyframes glow-blue {
-      0%, 100% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.2); }
-      50% { box-shadow: 0 0 40px rgba(59, 130, 246, 0.4); }
+    @keyframes scanline { 0% { top: -100%; } 100% { top: 100%; } }
+    .scanline { width: 100%; height: 100px; background: linear-gradient(to bottom, transparent, rgba(59, 130, 246, 0.1), transparent); position: absolute; animation: scanline 8s linear infinite; pointer-events: none; }
+    
+    .grid-dashboard {
+      display: grid;
+      grid-template-areas: 
+        "top top top"
+        "sidebar map media"
+        "dock dock dock";
+      grid-template-columns: 25% 50% 25%;
+      grid-template-rows: 120px 1fr 140px;
+      height: 100vh;
+      width: 100vw;
+      padding: 2rem;
+      gap: 2rem;
     }
-    .animate-glow-blue { animation: glow-blue 3s infinite; }
   </style>
 <script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@19.0.0",
-    "react-dom": "https://esm.sh/react-dom@19.0.0",
-    "react-dom/": "https://esm.sh/react-dom@19.0.0/",
-    "react/": "https://esm.sh/react@19.0.0/",
-    "@google/genai": "https://esm.sh/@google/genai@1.3.0",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
-    "vite": "https://esm.sh/vite@^7.3.1"
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "@google/genai": "https://esm.sh/@google/genai@^1.40.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.3"
   }
 }
 </script>

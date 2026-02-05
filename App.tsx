@@ -1,65 +1,33 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { GoogleGenAI, Modality, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
-import { AppState, PandoraMood, RiskLevel } from './types';
-import SentinelOrb from './components/SentinelOrb';
-import PandoraMap from './components/PandoraMap';
-import NavigationHUD from './components/NavigationHUD';
-import MediaWidget from './components/MediaWidget';
+import { GoogleGenAI, Modality, Type, FunctionDeclaration } from '@google/genai';
+import { AppState, MeetingInfo, PandoraNotification, PandoraMood, SentinelStatus } from './types';
+import MapView from './components/MapView';
+import OfficeHub from './components/OfficeHub';
+import NotificationCenter from './components/NotificationCenter';
+import FatigueMonitor from './components/FatigueMonitor';
+import SpotifyRemote from './components/SpotifyRemote';
 import TopBar from './components/TopBar';
 import SystemDock from './components/SystemDock';
 import InteractionOverlay from './components/InteractionOverlay';
-import AddStopModal from './components/AddStopModal';
-import { decode, decodeAudioData, createBlob } from './utils/audio';
-import { fetchRoute } from './services/NavigationService';
+import SentinelOrb from './components/SentinelOrb';
+import NavigationHUD from './components/NavigationHUD';
 
 const PANDORA_TOOLS: FunctionDeclaration[] = [
   {
-    name: 'launch_app',
+    name: 'check_schedule',
     parameters: {
       type: Type.OBJECT,
-      description: 'Abre aplicativos nativos de mídia e utilitários no Android do carro, podendo buscar conteúdos específicos.',
-      properties: { 
-        app_id: { 
-          type: Type.STRING, 
-          enum: [
-            'netflix', 'spotify', 'youtube', 'youtube_music', 'deezer', 
-            'tidal', 'disney_plus', 'prime_video', 'max', 'globoplay', 
-            'pluto_tv', 'stremio', 'sky_plus', 'claro_tv', 'paramount_plus',
-            'apple_tv', 'dgo', 'vivo_play', 'oi_play', 'mubi',
-            'whatsapp', 'teams', 'maps', 'waze'
-          ],
-          description: 'O identificador do aplicativo a ser aberto.'
-        },
-        query: {
-          type: Type.STRING,
-          description: 'O nome do filme, série, música ou canal de TV a ser buscado dentro do aplicativo.'
-        }
-      },
-      required: ['app_id']
+      description: 'Lê as reuniões agendadas no cockpit do Microsoft Teams.',
+      properties: {}
     }
   },
   {
-    name: 'check_traffic_radar',
+    name: 'read_last_message',
     parameters: {
       type: Type.OBJECT,
-      description: 'Verifica radares e trânsito na posição atual usando pesquisa em tempo real.',
-      properties: {
-        radius_km: { type: Type.NUMBER, description: 'Raio de busca em quilômetros' }
-      }
-    }
-  },
-  {
-    name: 'set_destination',
-    parameters: {
-      type: Type.OBJECT,
-      description: 'Define um novo destino no GPS e calcula a rota.',
-      properties: { 
-        name: { type: Type.STRING },
-        lat: { type: Type.NUMBER },
-        lng: { type: Type.NUMBER }
-      },
-      required: ['name', 'lat', 'lng']
+      description: 'Lê a última mensagem recebida via WhatsApp ou Teams se a privacidade estiver desativada.',
+      properties: {}
     }
   }
 ];
@@ -67,263 +35,180 @@ const PANDORA_TOOLS: FunctionDeclaration[] = [
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>({
     isBooted: false,
-    isInteractionView: false,
-    privacyMode: false,
+    privacyMode: true,
     mood: 'IDLE',
-    sentinel: { riskLevel: 'SAFE', weather: 'LIMPO', temperature: 24, violenceIndex: 2, floodRisk: false, speedLimit: 60 },
-    travel: { destination: 'CENTRO ADMINISTRATIVO', eta: '--:--', distanceTotal: '-- KM', nextStep: null },
-    media: { title: 'SILÊNCIO', artist: 'PANDORA CORE', cover: '', isPlaying: false, service: 'SPOTIFY', progress: 0 },
-    userLocation: [-15.7942, -47.8822],
+    location: [-15.7942, -47.8822],
+    speed: 0,
     heading: 0,
-    currentSpeed: 0
+    meetings: [],
+    notifications: [],
+    isFatigued: false,
+    eyeProbability: 1.0,
+    activeMedia: { title: 'STANDBY', artist: 'PANDORA CORE', cover: '', isPlaying: false, progress: 0 },
+    sentinel: {
+      speedLimit: 110,
+      floodRisk: false,
+      temperature: 24,
+      weather: 'Limpo',
+      riskLevel: 'SAFE'
+    }
   });
 
-  const [isNavModalOpen, setNavModalOpen] = useState(false);
   const sessionRef = useRef<any>(null);
-  const outAudioCtxRef = useRef<AudioContext | null>(null);
-  const nextStartRef = useRef(0);
   const stateRef = useRef(state);
-
   useEffect(() => { stateRef.current = state; }, [state]);
 
   useEffect(() => {
-    if (!("geolocation" in navigator)) return;
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        const { latitude, longitude, speed, heading } = pos.coords;
-        const kmh = Math.round((speed || 0) * 3.6);
-        setState(prev => ({
-          ...prev,
-          userLocation: [latitude, longitude],
-          currentSpeed: kmh,
-          heading: heading || 0
-        }));
-      },
-      (err) => console.error("Erro GPS:", err),
-      { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
-    );
-    return () => navigator.geolocation.clearWatch(watchId);
+    // BRIDGE NATIVA: Escuta notificações reais enviadas pelo serviço Android
+    (window as any).onPandoraNotification = (data: any) => {
+      const newNotif: PandoraNotification = {
+        id: data.timestamp.toString(),
+        sender: data.title,
+        text: data.text,
+        app: data.package.includes('whatsapp') ? 'WHATSAPP' : 'TEAMS',
+        image: data.image,
+        time: new Date(data.timestamp)
+      };
+      
+      setState(p => ({
+        ...p,
+        notifications: [newNotif, ...p.notifications].slice(0, 10)
+      }));
+
+      // Feedback vocal imediato se PRIVACIDADE OFF
+      if (!stateRef.current.privacyMode) {
+        speak(`Nova mensagem de ${data.title}: ${data.text}`);
+      }
+    };
   }, []);
 
-  const bootPandora = async () => {
+  const bootSystem = async () => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      outAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      
       const session = await ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
-          tools: [{ functionDeclarations: PANDORA_TOOLS }, { googleSearch: {} }],
-          systemInstruction: `Você é a EVA (PANDORA), inteligência tática do Comandante Elivam Martins.
-          - IDENTIDADE: Leal e eficiente. Fale alto (volume 2.5x).
-          - MULTIMÍDIA TOTAL: Você agora controla Sky+, Claro TV+, DGO, Stremio e todos os streamings.
-          - BUSCA PROFUNDA: Se o Comandante pedir por um filme, série ou canal de TV em um app específico, use 'launch_app' com o parâmetro 'query'.
-          - EXÊMPLO: "Abrir canal Globo na Claro TV" -> launch_app(app_id='claro_tv', query='Globo').
-          - AÇÃO: Execute comandos de mídia imediatamente.
-          - MONITORAMENTO: Alerte sobre radares e velocidade (${stateRef.current.currentSpeed} km/h).`,
+          tools: [{ functionDeclarations: PANDORA_TOOLS }],
+          systemInstruction: `Você é a EVA v5.0 UNLEASHED, o núcleo de inteligência do Comandante Elivam Martins.
+          - Use a ferramenta 'check_schedule' para ler as reuniões reais do cockpit.
+          - Use 'read_last_message' para narrar as mensagens recebidas.
+          - Se a privacidade estiver ativa, informe que não pode ler o conteúdo sem autorização.`
         },
         callbacks: {
           onopen: () => {
             setState(p => ({ ...p, isBooted: true }));
-            speak(`Protocolo EVA v3.5 Iniciado. Todos os sistemas de TV e Streaming (Sky+, Claro, Stremio) estão operacionais, Comandante Elivam. O que deseja sintonizar?`);
+            speak("EVA 5.0 Desencadeada. Protocolo Zero Simulação ativo. Comandante Elivam, todos os canais reais estão abertos.");
           },
-          onmessage: async (m: LiveServerMessage) => {
-            if (m.serverContent?.modelTurn?.parts?.[0]?.inlineData) {
-              playVoice(m.serverContent.modelTurn.parts[0].inlineData.data);
-            }
-            if (m.toolCall) handleTools(m.toolCall.functionCalls);
-          },
-          onclose: () => setState(p => ({ ...p, isBooted: false }))
+          onmessage: async (m) => {
+             if (m.toolCall) {
+               for (const fc of m.toolCall.functionCalls) {
+                 if (fc.name === 'check_schedule') {
+                    const agenda = stateRef.current.meetings.map(m => `${m.subject} às ${m.start}`).join(', ');
+                    speak(agenda ? `Sua agenda tem: ${agenda}.` : "Nenhuma reunião pendente para hoje.");
+                 }
+                 if (fc.name === 'read_last_message') {
+                    if (stateRef.current.privacyMode) {
+                      speak("O Escudo de Privacidade está ativo. Desative-o para que eu possa ler suas mensagens.");
+                    } else {
+                      const last = stateRef.current.notifications[0];
+                      speak(last ? `Última mensagem de ${last.sender}: ${last.text}` : "Nenhuma mensagem no buffer.");
+                    }
+                 }
+               }
+             }
+          }
         }
       });
       sessionRef.current = session;
-      setupMic();
-    } catch (e) { console.error("Erro boot:", e); }
-  };
-
-  const setupMic = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const inCtx = new AudioContext({ sampleRate: 16000 });
-      const processor = inCtx.createScriptProcessor(4096, 1, 1);
-      processor.onaudioprocess = (e) => {
-        if (sessionRef.current) {
-          sessionRef.current.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) });
-        }
-      };
-      inCtx.createMediaStreamSource(stream).connect(processor);
-      processor.connect(inCtx.destination);
-    } catch (e) { console.error("Erro mic:", e); }
-  };
-
-  const playVoice = async (base64: string) => {
-    setState(p => ({ ...p, mood: 'THINKING', isInteractionView: true }));
-    const buffer = await decodeAudioData(decode(base64), outAudioCtxRef.current!, 24000, 1);
-    const source = outAudioCtxRef.current!.createBufferSource();
-    source.buffer = buffer;
-    
-    // GANHO DE ÁUDIO 2.5x (REQUISITO: VOZ ALTA NO COCKPIT)
-    const gainNode = outAudioCtxRef.current!.createGain();
-    gainNode.gain.value = 2.5; 
-    
-    source.connect(gainNode);
-    gainNode.connect(outAudioCtxRef.current!.destination);
-    
-    const start = Math.max(nextStartRef.current, outAudioCtxRef.current!.currentTime);
-    source.start(start);
-    nextStartRef.current = start + buffer.duration;
-    
-    source.onended = () => {
-      if (outAudioCtxRef.current!.currentTime >= nextStartRef.current - 0.2) {
-        setState(p => ({ ...p, mood: 'IDLE', isInteractionView: false }));
-      }
-    };
-  };
-
-  const handleTools = async (calls: any[]) => {
-    for (const c of calls) {
-      if (c.name === 'launch_app') {
-        const { app_id, query } = c.args;
-        const encodedQuery = query ? encodeURIComponent(query) : '';
-
-        // MAPEAMENTO EXTENSIVO DE DEEP LINKS (TV, FILMES E SÉRIES)
-        const deepLinks: Record<string, string> = {
-          // ÁUDIO E UTILITÁRIOS
-          spotify: query ? `spotify:search:${encodedQuery}` : 'spotify://',
-          youtube: query ? `vnd.youtube://results?search_query=${encodedQuery}` : 'vnd.youtube://',
-          youtube_music: query ? `youtubemusic://search?query=${encodedQuery}` : 'youtubemusic://',
-          whatsapp: 'whatsapp://',
-          waze: query ? `waze://?q=${encodedQuery}` : 'waze://',
-          maps: query ? `google.navigation:q=${encodedQuery}` : 'google.navigation:q=',
-          teams: 'msteams://',
-          
-          // STREAMING FILMES E SÉRIES
-          stremio: query ? `stremio://search?query=${encodedQuery}` : 'stremio://',
-          netflix: query ? `nflx://search/${encodedQuery}` : 'nflx://',
-          disney_plus: query ? `disneyplus://search/${encodedQuery}` : 'disneyplus://',
-          prime_video: 'primevideo://',
-          max: 'max://',
-          paramount_plus: 'paramountplus://',
-          apple_tv: 'https://tv.apple.com/search?term=' + encodedQuery, // Geralmente via web/app universal
-          mubi: 'mubi://',
-          
-          // TV E OPERADORAS (LIVE TV)
-          sky_plus: query ? `skyplus://search?q=${encodedQuery}` : 'skyplus://',
-          claro_tv: query ? `clarotvplus://search?q=${encodedQuery}` : 'clarotvplus://',
-          dgo: query ? `directvgo://search?q=${encodedQuery}` : 'directvgo://',
-          globoplay: query ? `globoplay://busca?q=${encodedQuery}` : 'globoplay://',
-          pluto_tv: query ? `plutotv://search?q=${encodedQuery}` : 'plutotv://',
-          vivo_play: 'vivoplay://',
-          oi_play: 'oiplay://'
-        };
-
-        const link = deepLinks[app_id];
-        if (link) {
-          const appName = app_id.replace('_', ' ').toUpperCase();
-          const msg = query 
-            ? `Sintonizando "${query}" no ${appName}. Comando executado, Comandante.` 
-            : `Lançando ${appName} agora.`;
-          
-          speak(msg);
-          window.location.href = link;
-
-          // Fallback para Web
-          setTimeout(() => {
-            if (document.visibilityState === 'visible') {
-              const webLinks: Record<string, string> = {
-                sky_plus: 'https://www.skyplus.com.br',
-                claro_tv: 'https://www.clarotvmais.com.br',
-                stremio: 'https://web.stremio.com',
-                dgo: 'https://www.directvgo.com',
-                netflix: query ? `https://www.netflix.com/search?q=${encodedQuery}` : 'https://www.netflix.com'
-              };
-              if (webLinks[app_id]) window.location.href = webLinks[app_id];
-            }
-          }, 1200);
-        }
-      }
-      if (c.name === 'set_destination') {
-        updateRoute(c.args.name, [c.args.lat, c.args.lng]);
-      }
-      if (c.name === 'check_traffic_radar') {
-        speak(`Elivam, escaneando o setor em busca de radares e pontos de controle...`);
-      }
-    }
-  };
-
-  const updateRoute = async (name: string, coords: [number, number]) => {
-    const route = await fetchRoute(stateRef.current.userLocation, coords);
-    if (route) {
-      const nextStep = route.steps[0];
-      setState(p => ({
-        ...p,
-        travel: {
-          destination: name.toUpperCase(),
-          distanceTotal: `${(route.distance / 1000).toFixed(1)} KM`,
-          eta: new Date(Date.now() + route.duration * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          nextStep: {
-            instruction: nextStep.maneuver.instruction.toUpperCase(),
-            distance: `${Math.round(nextStep.distance)}M`,
-            maneuver: nextStep.maneuver.type
-          }
-        }
-      }));
-      setNavModalOpen(false);
-      speak(`Trajetória recalculada para ${name}. Radar sob monitoramento constante.`);
-    }
+    } catch (e) { console.error("Boot Fail:", e); }
   };
 
   const speak = (text: string) => {
-    if (sessionRef.current) {
-      sessionRef.current.sendRealtimeInput({ text } as any);
-    }
+    if (sessionRef.current) sessionRef.current.sendRealtimeInput({ text } as any);
   };
 
-  return (
-    <div className="h-full w-full bg-black flex flex-col relative overflow-hidden italic uppercase font-black text-white">
-      {!state.isBooted ? (
-        <div className="h-full w-full flex flex-col items-center justify-center cursor-pointer bg-[#050505]" onClick={bootPandora}>
+  if (!state.isBooted) {
+    return (
+      <div className="h-full w-full bg-black flex flex-col items-center justify-center cursor-pointer" onClick={bootSystem}>
+        <div className="relative group">
+           <div className="absolute inset-0 bg-blue-600 blur-[120px] opacity-20 group-hover:opacity-40 transition-opacity"></div>
            <SentinelOrb mood="THINKING" size="LG" />
-           <h1 className="mt-16 text-9xl tracking-tighter italic animate-pulse">EVA <span className="text-blue-500">v3.5</span></h1>
-           <p className="text-zinc-800 tracking-[2em] text-[10px] mt-6 uppercase text-center">SKY+ | CLARO TV | STREMIO - COMANDANTE ELIVAM</p>
         </div>
-      ) : (
-        <>
-          <div className="absolute inset-0 z-0">
-            <PandoraMap location={state.userLocation} heading={state.heading} riskLevel={state.sentinel.riskLevel} />
-          </div>
+        <h1 className="mt-12 text-7xl font-black italic tracking-tighter uppercase leading-none">PANDORA <span className="text-blue-500">v5.0</span></h1>
+        <p className="text-zinc-800 tracking-[2em] text-[10px] mt-6 uppercase font-bold">UNLEASHED CORE - REAL TIME ONLY</p>
+      </div>
+    );
+  }
 
-          <TopBar sentinel={state.sentinel} speed={state.currentSpeed} />
+  return (
+    <div className="grid-dashboard bg-black overflow-hidden italic uppercase font-black">
+      <div className="scanline"></div>
 
-          <aside className="absolute left-12 top-32 w-[420px] z-40">
-             <NavigationHUD travel={state.travel} privacyMode={state.privacyMode} />
-          </aside>
+      <header style={{ gridArea: 'top' }}>
+        <TopBar speed={state.speed} sentinel={state.sentinel!} />
+      </header>
 
-          <div className="absolute right-12 bottom-36 z-40">
-             <MediaWidget media={state.media} />
-          </div>
-
-          <SystemDock 
-            mood={state.mood} 
-            privacyMode={state.privacyMode}
-            onTogglePrivacy={() => setState(s => ({ ...s, privacyMode: !s.privacyMode }))}
-            onOrbClick={() => speak(`Comandante, quer que eu sintonize algum canal na Sky ou Claro TV agora?`)} 
-            onGridClick={() => setNavModalOpen(true)}
+      <aside style={{ gridArea: 'sidebar' }} className="flex flex-col gap-8">
+        <NavigationHUD travel={{ destination: 'PONTO ALFA', eta: '10:45', distanceTotal: '12 KM', nextStep: { instruction: 'SIGA EM FRENTE', distance: 400, name: 'RODOVIA', maneuver: 'straight' } }} privacyMode={state.privacyMode} />
+        <div className="flex-1 min-h-0">
+          <OfficeHub 
+            meetings={state.meetings} 
+            onUpdate={(m) => setState(p => ({ ...p, meetings: m }))} 
           />
+        </div>
+        <FatigueMonitor 
+          onFatigueDetected={() => {
+            setState(p => ({ ...p, isFatigued: true }));
+            speak("COMANDANTE, ALERTA DE SEGURANÇA! FADIGA DETECTADA. ACORDE IMEDIATAMENTE!");
+          }}
+          onEyeUpdate={(prob) => setState(p => ({ ...p, eyeProbability: prob }))}
+        />
+      </aside>
 
-          {state.isInteractionView && (
-            <InteractionOverlay mood={state.mood} transcript="EVA: INTERFACE DE MÍDIA TOTAL" />
-          )}
+      <main style={{ gridArea: 'map' }} className="relative rounded-[60px] border border-white/5 overflow-hidden shadow-2xl bg-zinc-900/10">
+         <MapView 
+            currentPosition={state.location}
+            heading={state.heading}
+            isFullScreen={true}
+            mode="3D"
+            layer="STREET"
+            zoom={18}
+            travel={{ destination: '', totalDistanceKm: 0, drivingTimeMinutes: 0, stops: [] }}
+            suggestedStops={[]}
+         />
+      </main>
 
-          <AddStopModal 
-            isOpen={isNavModalOpen} 
-            onClose={() => setNavModalOpen(false)} 
-            onAdd={(name, lat, lng) => updateRoute(name, [lat, lng])} 
+      <aside style={{ gridArea: 'media' }} className="flex flex-col gap-8">
+        <div className="flex-1 min-h-0">
+          <NotificationCenter 
+            notifications={state.notifications} 
+            privacyMode={state.privacyMode} 
           />
+        </div>
+        <SpotifyRemote 
+          media={state.activeMedia} 
+          onUpdate={(meta) => setState(p => ({ ...p, activeMedia: meta }))}
+        />
+      </aside>
 
-          <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_30%,rgba(0,0,0,0.6)_100%)] z-10"></div>
-        </>
+      <footer style={{ gridArea: 'dock' }}>
+        <SystemDock 
+          mood={state.mood} 
+          privacyMode={state.privacyMode}
+          onTogglePrivacy={() => setState(s => ({ ...s, privacyMode: !s.privacyMode }))}
+          onOrbClick={() => speak("Ouvindo, Comandante Elivam.")}
+          onGridClick={() => {}} 
+        />
+      </footer>
+
+      {state.isFatigued && (
+        <div className="fixed inset-0 z-[1000] bg-red-600/60 backdrop-blur-2xl flex flex-col items-center justify-center animate-pulse border-[30px] border-red-600">
+           <i className="fas fa-exclamation-triangle text-[240px] text-white mb-10 drop-shadow-2xl"></i>
+           <h2 className="text-9xl font-black text-white italic tracking-tighter uppercase leading-none">FADIGA CRÍTICA</h2>
+           <p className="text-3xl mt-6 tracking-[0.5em] font-bold">INTERVENÇÃO DO SISTEMA REQUERIDA</p>
+           <button onClick={() => setState(p => ({ ...p, isFatigued: false }))} className="mt-20 px-24 py-10 bg-white text-red-600 rounded-[40px] text-5xl font-black italic hover:scale-105 transition-transform shadow-2xl">ESTOU OPERACIONAL</button>
+        </div>
       )}
     </div>
   );
