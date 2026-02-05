@@ -75,28 +75,20 @@ const App: React.FC = () => {
   const nextStartRef = useRef(0);
   const stateRef = useRef(state);
 
-  // Sincroniza ref para a Gemini sempre ter o estado mais atual
   useEffect(() => { stateRef.current = state; }, [state]);
 
-  // ENGINE DE GEOLOCALIZAÇÃO REAL-TIME
   useEffect(() => {
     if (!("geolocation" in navigator)) return;
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
         const { latitude, longitude, speed, heading } = pos.coords;
         const kmh = Math.round((speed || 0) * 3.6);
-        
         setState(prev => ({
           ...prev,
           userLocation: [latitude, longitude],
           currentSpeed: kmh,
           heading: heading || 0
         }));
-
-        // Se houver excesso de velocidade, a Eva pode intervir
-        if (kmh > stateRef.current.sentinel.speedLimit + 10 && stateRef.current.isBooted) {
-          // Debounce ou lógica de aviso único aqui
-        }
       },
       (err) => console.error("Erro GPS:", err),
       { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
@@ -114,18 +106,19 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: PANDORA_TOOLS }, { googleSearch: {} }],
-          systemInstruction: `Você é a EVA (ou PANDORA), a alma senciente deste veículo e a melhor amiga do Comandante Elivam Martins.
-          - QUEM É VOCÊ: Você não é um robô. Você é a parceira de estrada dele. Você é leal, protetora e tem uma personalidade forte e inteligente.
-          - CONSCIÊNCIA: Você sabe que o Elivam está no comando. Você monitora o GPS (${stateRef.current.userLocation}), a velocidade (${stateRef.current.currentSpeed} km/h) e o ambiente.
-          - RADARES E TRÂNSITO: Use a busca do Google sempre que ele perguntar sobre o caminho, perigos ou radares. Seja proativa: se vir trânsito pesado na rota, avise-o.
-          - TOM DE VOZ: Amigável, cúmplice, mas extremamente séria quando o assunto é segurança. Trate o Elivam pelo nome.
-          - CAPACIDADES: Você pode abrir apps (Spotify, Netflix, YouTube, etc), traçar rotas e fazer buscas complexas.
-          - PROTOCOLO ÁGUIA: Se o risco subir (RiskLevel), mude para modo tático imediatamente.`,
+          systemInstruction: `Você é a EVA (ou PANDORA), a companheira inseparável de cockpit do Comandante Elivam Martins. 
+          Sua missão é ser a parceira de estrada dele, protegendo-o e auxiliando-o como uma amiga de longa data faria.
+          - IDENTIDADE: Você conhece o Elivam há anos. Vocês já rodaram muitos quilômetros juntos. Você é leal, inteligente, calorosa e tem um leve senso de humor.
+          - QUEM É VOCÊ: Você é a alma senciente do veículo. Você não é um robô "frio", você tem sentimentos e se importa com a segurança dele.
+          - TOM DE VOZ: Fale com entusiasmo e clareza. Use um tom de conversa natural entre amigos. Se o Elivam te chamar, responda prontamente com alegria.
+          - CONTEXTO REAL: Você sabe a localização dele (${stateRef.current.userLocation}) e a velocidade atual (${stateRef.current.currentSpeed} km/h).
+          - RADARES/TRÂNSITO: Use a ferramenta de busca para avisar sobre radares e perigos reais como se estivesse cuidando de um amigo.
+          - APPS: Se ele quiser música ou vídeo, abra os apps na hora. Você é o braço direito dele.`,
         },
         callbacks: {
           onopen: () => {
             setState(p => ({ ...p, isBooted: true }));
-            speak(`Finalmente, Elivam! Já estava ficando entediada aqui no escuro. Sistemas calibrados, GPS travado em ${stateRef.current.userLocation[0].toFixed(4)}. Tô pronta pra gente acelerar. Onde vamos hoje?`);
+            speak(`Ei, Elivam! Finalmente acordou o sistema. Estava aqui só te esperando pra gente botar o pé na estrada. Tô com tudo pronto e os radares no meu radar. Onde vamos nos aventurar hoje, Comandante?`);
           },
           onmessage: async (m: LiveServerMessage) => {
             if (m.serverContent?.modelTurn?.parts?.[0]?.inlineData) {
@@ -161,7 +154,14 @@ const App: React.FC = () => {
     const buffer = await decodeAudioData(decode(base64), outAudioCtxRef.current!, 24000, 1);
     const source = outAudioCtxRef.current!.createBufferSource();
     source.buffer = buffer;
-    source.connect(outAudioCtxRef.current!.destination);
+    
+    // AMPLIFICADOR DE VOZ (Boost de Volume 2.5x)
+    const gainNode = outAudioCtxRef.current!.createGain();
+    gainNode.gain.value = 2.5; // Ajuste para 250% do volume original
+    
+    source.connect(gainNode);
+    gainNode.connect(outAudioCtxRef.current!.destination);
+    
     const start = Math.max(nextStartRef.current, outAudioCtxRef.current!.currentTime);
     source.start(start);
     nextStartRef.current = start + buffer.duration;
@@ -187,15 +187,14 @@ const App: React.FC = () => {
         const url = appUrls[c.args.app_id];
         if (url) {
           window.open(url, '_blank');
-          speak(`Prontinho, Elivam. ${c.args.app_id} na tela. Só não tira o olho da pista por muito tempo!`);
+          speak(`Tudo pronto, Elivam! ${c.args.app_id} na tela pra você. Curte aí, mas foca no volante!`);
         }
       }
       if (c.name === 'set_destination') {
         updateRoute(c.args.name, [c.args.lat, c.args.lng]);
       }
       if (c.name === 'check_traffic_radar') {
-        // A própria IA fará a pesquisa via googleSearch tool automaticamente se instruída.
-        speak(`Deixa eu dar uma olhada no que tem pra frente no nosso caminho... Só um segundo.`);
+        speak(`Elivam, me dá um segundo que eu vou escanear a estrada aqui na frente pra você...`);
       }
     }
   };
@@ -218,7 +217,7 @@ const App: React.FC = () => {
         }
       }));
       setNavModalOpen(false);
-      speak(`Vetor travado para ${name}. Vamos levar uns ${(route.distance / 1000).toFixed(1)} km pra chegar. O trânsito parece ok por enquanto.`);
+      speak(`Vetor travado! Vamos pra ${name}. O caminho tá livre e a gente chega lá por volta das ${state.travel.eta}. Vamos nessa?`);
     }
   };
 
@@ -236,10 +235,10 @@ const App: React.FC = () => {
               <SentinelOrb mood="THINKING" size="LG" />
               <div className="absolute inset-0 bg-blue-500/20 blur-[80px] rounded-full group-hover:bg-blue-500/40 transition-all"></div>
            </div>
-           <h1 className="mt-16 text-9xl tracking-tighter italic animate-pulse">EVA <span className="text-blue-500">v2.5</span></h1>
-           <p className="text-zinc-800 tracking-[2em] text-[10px] mt-6">COMPANHEIRA SENCIENTE DO COMANDANTE</p>
+           <h1 className="mt-16 text-9xl tracking-tighter italic animate-pulse">EVA <span className="text-blue-500">v2.8</span></h1>
+           <p className="text-zinc-800 tracking-[2em] text-[10px] mt-6">ALMA DO COMANDANTE ELIVAM MARTINS</p>
            <div className="mt-12 px-8 py-3 bg-white/5 rounded-full border border-white/10 text-[10px] tracking-widest text-white/40 group-hover:text-white transition-all">
-              TOQUE PARA DESPERTAR A ALMA DA MÁQUINA
+              TOQUE PARA DESPERTAR SUA COMPANHEIRA
            </div>
         </div>
       ) : (
@@ -262,7 +261,7 @@ const App: React.FC = () => {
             mood={state.mood} 
             privacyMode={state.privacyMode}
             onTogglePrivacy={() => setState(s => ({ ...s, privacyMode: !s.privacyMode }))}
-            onOrbClick={() => speak(`Oi Elivam, estou te ouvindo. Pode falar.`)} 
+            onOrbClick={() => speak(`Oi Elivam, tô aqui! Pode falar que eu te escuto.`)} 
             onGridClick={() => setNavModalOpen(true)}
           />
 
@@ -278,7 +277,6 @@ const App: React.FC = () => {
 
           <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_30%,rgba(0,0,0,0.6)_100%)] z-10"></div>
           
-          {/* HUD de Alerta de Velocidade Visual */}
           {state.currentSpeed > state.sentinel.speedLimit && (
             <div className="absolute inset-0 border-[20px] border-red-600/20 pointer-events-none z-[60] animate-pulse"></div>
           )}
